@@ -30,37 +30,61 @@ export async function readGraphSnapshot(projectPath: string, options: GraphSnaps
   try {
     const totalNodes = scalar(db, 'SELECT COUNT(*) AS count FROM nodes');
     const totalEdges = scalar(db, 'SELECT COUNT(*) AS count FROM edges');
-    const rows = selectNodes(db, options);
-    const nodeIds = rows.map((row) => row.id);
-    const edges = selectEdges(db, nodeIds, options.edgeKinds);
-    const degree = new Map<string, number>();
-    for (const edge of edges) {
-      degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-      degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
-    }
+    const snapshot = options.mode === 'node' && options.focusNodeId
+      ? selectFocusedGraph(db, options)
+      : selectGlobalGraph(db, options);
 
-    return {
+    return buildSnapshot({
       projectPath,
       totalNodes,
       totalEdges,
-      nodes: rows.map((row) => ({
-        id: row.id,
-        kind: row.kind,
-        name: row.name,
-        qualifiedName: row.qualified_name,
-        filePath: row.file_path,
-        language: row.language,
-        startLine: row.start_line,
-        endLine: row.end_line,
-        degree: degree.get(row.id) ?? row.degree,
-      })),
-      edges,
-      limited: rows.length < totalNodes,
-      generatedAt: Date.now(),
-    };
+      rows: snapshot.rows,
+      edges: snapshot.edges,
+      limited: snapshot.limited,
+    });
   } finally {
     db.close();
   }
+}
+
+function selectGlobalGraph(db: Database, options: GraphSnapshotOptions): { rows: NodeRow[]; edges: GraphEdge[]; limited: boolean } {
+  const totalNodes = scalar(db, 'SELECT COUNT(*) AS count FROM nodes');
+  const rows = selectNodes(db, options);
+  const nodeIds = rows.map((row) => row.id);
+  const edges = selectEdges(db, nodeIds, options.edgeKinds);
+  return {
+    rows,
+    edges,
+    limited: rows.length < totalNodes,
+  };
+}
+
+function selectFocusedGraph(db: Database, options: GraphSnapshotOptions): { rows: NodeRow[]; edges: GraphEdge[]; limited: boolean } {
+  const focusNode = selectNodeById(db, options.focusNodeId ?? '');
+  if (!focusNode) {
+    throw new Error(`未找到聚焦节点：${options.focusNodeId ?? ''}`);
+  }
+
+  const maxNodes = Math.max(2, Math.min(options.maxNodes || 300, 1000));
+  const focusDirection = options.focusDirection ?? 'both';
+  const focusEdges = selectFocusEdges(db, focusNode.id, options.edgeKinds, focusDirection);
+  const neighborIds = new Set<string>();
+  for (const edge of focusEdges) {
+    if (edge.source !== focusNode.id) neighborIds.add(edge.source);
+    if (edge.target !== focusNode.id) neighborIds.add(edge.target);
+  }
+
+  const neighborRows = selectNodesByIds(db, [...neighborIds], options.nodeKinds)
+    .sort((a, b) => b.degree - a.degree || a.file_path.localeCompare(b.file_path) || a.start_line - b.start_line);
+  const selectedNeighbors = neighborRows.slice(0, Math.max(0, maxNodes - 1));
+  const selectedIds = new Set([focusNode.id, ...selectedNeighbors.map((row) => row.id)]);
+  const edges = focusEdges.filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target));
+
+  return {
+    rows: [focusNode, ...selectedNeighbors],
+    edges,
+    limited: neighborRows.length > selectedNeighbors.length,
+  };
 }
 
 function selectNodes(db: Database, options: GraphSnapshotOptions): NodeRow[] {
@@ -99,6 +123,39 @@ function selectNodes(db: Database, options: GraphSnapshotOptions): NodeRow[] {
   );
 }
 
+function selectNodeById(db: Database, nodeId: string): NodeRow | null {
+  return rows<NodeRow>(
+    db,
+    `SELECT n.id, n.kind, n.name, n.qualified_name, n.file_path, n.language, n.start_line, n.end_line,
+        (SELECT COUNT(*) FROM edges e WHERE e.source = n.id OR e.target = n.id) AS degree
+       FROM nodes n
+       WHERE n.id = ?
+       LIMIT 1`,
+    [nodeId],
+  )[0] ?? null;
+}
+
+function selectNodesByIds(db: Database, nodeIds: string[], nodeKinds: string[]): NodeRow[] {
+  if (nodeIds.length === 0) return [];
+  const idsJson = JSON.stringify(nodeIds);
+  const params: SqlValue[] = [idsJson];
+  let kindWhere = '';
+  if (nodeKinds.length > 0) {
+    kindWhere = ` AND n.kind IN (${nodeKinds.map(() => '?').join(',')})`;
+    params.push(...nodeKinds);
+  }
+
+  return rows<NodeRow>(
+    db,
+    `SELECT n.id, n.kind, n.name, n.qualified_name, n.file_path, n.language, n.start_line, n.end_line,
+        (SELECT COUNT(*) FROM edges e WHERE e.source = n.id OR e.target = n.id) AS degree
+       FROM nodes n
+       WHERE n.id IN (SELECT value FROM json_each(?))
+       ${kindWhere}`,
+    params,
+  );
+}
+
 function selectEdges(db: Database, nodeIds: string[], edgeKinds: string[]): GraphEdge[] {
   if (nodeIds.length === 0) return [];
   const idsJson = JSON.stringify(nodeIds);
@@ -127,6 +184,92 @@ function selectEdges(db: Database, nodeIds: string[], edgeKinds: string[]): Grap
     kind: row.kind,
     line: row.line,
   }));
+}
+
+function selectFocusEdges(
+  db: Database,
+  focusNodeId: string,
+  edgeKinds: string[],
+  direction: 'both' | 'incoming' | 'outgoing',
+): GraphEdge[] {
+  const params: SqlValue[] = [];
+  let directionWhere = '';
+  if (direction === 'incoming') {
+    directionWhere = 'target = ?';
+    params.push(focusNodeId);
+  } else if (direction === 'outgoing') {
+    directionWhere = 'source = ?';
+    params.push(focusNodeId);
+  } else {
+    directionWhere = '(source = ? OR target = ?)';
+    params.push(focusNodeId, focusNodeId);
+  }
+
+  let kindWhere = '';
+  if (edgeKinds.length > 0) {
+    kindWhere = ` AND kind IN (${edgeKinds.map(() => '?').join(',')})`;
+    params.push(...edgeKinds);
+  }
+
+  const edgeRows = rows<EdgeRow>(
+    db,
+    `SELECT id AS rowid, source, target, kind, line
+       FROM edges
+       WHERE ${directionWhere}
+         ${kindWhere}
+       LIMIT 5000`,
+    params,
+  );
+
+  return edgeRows.map((row) => ({
+    id: String(row.rowid),
+    source: row.source,
+    target: row.target,
+    kind: row.kind,
+    line: row.line,
+  }));
+}
+
+function buildSnapshot({
+  projectPath,
+  totalNodes,
+  totalEdges,
+  rows,
+  edges,
+  limited,
+}: {
+  projectPath: string;
+  totalNodes: number;
+  totalEdges: number;
+  rows: NodeRow[];
+  edges: GraphEdge[];
+  limited: boolean;
+}): GraphSnapshot {
+  const degree = new Map<string, number>();
+  for (const edge of edges) {
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+  }
+
+  return {
+    projectPath,
+    totalNodes,
+    totalEdges,
+    nodes: rows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      name: row.name,
+      qualifiedName: row.qualified_name,
+      filePath: row.file_path,
+      language: row.language,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      degree: degree.get(row.id) ?? row.degree,
+    })),
+    edges,
+    limited,
+    generatedAt: Date.now(),
+  };
 }
 
 function scalar(db: Database, sql: string): number {

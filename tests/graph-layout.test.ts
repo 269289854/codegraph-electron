@@ -54,6 +54,28 @@ describe('graph layout', () => {
     expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(1100);
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(700);
   });
+
+  it('places a focused node in the center of a focused layout', () => {
+    const snapshot: GraphSnapshot = {
+      projectPath: 'D:/repo',
+      totalNodes: 3,
+      totalEdges: 2,
+      limited: false,
+      generatedAt: 1,
+      nodes: [node('center', 2), node('incoming', 1), node('outgoing', 1)],
+      edges: [
+        { id: '1', source: 'incoming', target: 'center', kind: 'calls', line: null },
+        { id: '2', source: 'center', target: 'outgoing', kind: 'calls', line: null },
+      ],
+    };
+
+    const layout = createGraphLayout(snapshot, 1000, 700, { focusNodeId: 'center' });
+    const center = layout.nodes.find((item) => item.id === 'center');
+
+    expect(center?.x).toBeCloseTo(500);
+    expect(center?.y).toBeCloseTo(350);
+    expect(layout.edges).toHaveLength(2);
+  });
 });
 
 function node(id: string, degree: number) {

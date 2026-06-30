@@ -1,4 +1,4 @@
-import { Activity, Box, FolderOpen, GitBranch, RefreshCw, Search, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowLeft, Box, FolderOpen, GitBranch, RefreshCw, Search, Trash2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createGraphLayout } from '../../shared/graph-layout';
 import { clampScale, zoomViewportAtPoint } from '../../shared/viewport';
@@ -13,9 +13,17 @@ const defaultFilters: FilterState = {
   mode: 'overview' as const,
   query: '',
   filePath: '',
+  focusNodeId: undefined,
+  focusDepth: 1,
+  focusDirection: 'both',
   maxNodes: 180,
   nodeKinds: [] as string[],
   edgeKinds: [] as string[],
+};
+
+type ViewHistoryItem = {
+  filters: FilterState;
+  selectedNodeId: string | null;
 };
 
 export function App(): JSX.Element {
@@ -26,10 +34,12 @@ export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
   const [filters, setFilters] = useState(defaultFilters);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [viewHistory, setViewHistory] = useState<ViewHistoryItem[]>([]);
   const [runtimeLogPath, setRuntimeLogPath] = useState<string>('');
 
   const activeProject = projects.find((project) => project.path === activePath) ?? null;
   const selectedNode = snapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const focusNode = filters.mode === 'node' ? snapshot?.nodes.find((node) => node.id === filters.focusNodeId) ?? selectedNode : null;
 
   useEffect(() => {
     void refreshInstall();
@@ -66,6 +76,7 @@ export function App(): JSX.Element {
     if (!project) return;
     setProjects((existing) => [project, ...existing.filter((item) => item.path !== project.path)]);
     setActivePath(project.path);
+    setViewHistory([]);
   }
 
   async function refreshStatus(projectPath = activePath): Promise<void> {
@@ -80,7 +91,7 @@ export function App(): JSX.Element {
     if (!activePath) return;
     const graph = await window.codegraphClient.getGraphSnapshot(activePath, filters);
     setSnapshot(graph);
-    setSelectedNodeId(graph.nodes[0]?.id ?? null);
+    setSelectedNodeId(filters.mode === 'node' ? filters.focusNodeId ?? graph.nodes[0]?.id ?? null : graph.nodes[0]?.id ?? null);
   }, [activePath, filters]);
 
   useEffect(() => {
@@ -108,6 +119,42 @@ export function App(): JSX.Element {
   const canBuild = Boolean(activePath && !status?.initialized);
   const canUseGraph = Boolean(activePath && status?.initialized);
   const jobList = useMemo(() => jobs.slice(0, 8), [jobs]);
+  const viewLabel = getViewLabel(filters, focusNode);
+
+  function setGlobalMode(mode: 'overview' | 'search' | 'file'): void {
+    setViewHistory([]);
+    setFilters((current) => ({
+      ...current,
+      mode,
+      focusNodeId: undefined,
+      focusDepth: 1,
+      focusDirection: 'both',
+    }));
+  }
+
+  function focusNodeGraph(nodeId: string): void {
+    const node = snapshot?.nodes.find((item) => item.id === nodeId);
+    setViewHistory((existing) => [...existing, { filters, selectedNodeId }]);
+    setFilters((current) => ({
+      ...current,
+      mode: 'node',
+      focusNodeId: nodeId,
+      focusDepth: 1,
+      focusDirection: 'both',
+    }));
+    setSelectedNodeId(nodeId);
+    setSnapshot(node ? { ...snapshot!, nodes: [node], edges: [], limited: true, generatedAt: Date.now() } : snapshot);
+  }
+
+  function goBackView(): void {
+    setViewHistory((existing) => {
+      const previous = existing.at(-1);
+      if (!previous) return existing;
+      setFilters(previous.filters);
+      setSelectedNodeId(previous.selectedNodeId);
+      return existing.slice(0, -1);
+    });
+  }
 
   return (
     <div className="shell">
@@ -137,7 +184,10 @@ export function App(): JSX.Element {
             <button
               className={project.path === activePath ? 'project active' : 'project'}
               key={project.path}
-              onClick={() => setActivePath(project.path)}
+              onClick={() => {
+                setActivePath(project.path);
+                setViewHistory([]);
+              }}
             >
               <strong>{project.name}</strong>
               <span>{project.path}</span>
@@ -175,6 +225,11 @@ export function App(): JSX.Element {
               </button>
             </div>
             <div className="graph-tools">
+              <button className="secondary graph-back-button" disabled={viewHistory.length === 0} onClick={goBackView}>
+                <ArrowLeft size={16} />
+                返回上一层
+              </button>
+              <span className="view-chip">{viewLabel}</span>
               <div className="search-box">
                 <Search size={16} />
                 <input
@@ -183,8 +238,8 @@ export function App(): JSX.Element {
                   onChange={(event) => setFilters({ ...filters, query: event.target.value })}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
-                      setFilters((current) => ({ ...current, mode: 'search' }));
-                      window.setTimeout(() => void refreshSnapshot(), 0);
+                      setViewHistory([]);
+                      setFilters((current) => ({ ...current, mode: 'search', focusNodeId: undefined }));
                     }
                   }}
                 />
@@ -196,20 +251,20 @@ export function App(): JSX.Element {
                   onChange={(event) => setFilters({ ...filters, filePath: event.target.value })}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
-                      setFilters((current) => ({ ...current, mode: 'file' }));
-                      window.setTimeout(() => void refreshSnapshot(), 0);
+                      setViewHistory([]);
+                      setFilters((current) => ({ ...current, mode: 'file', focusNodeId: undefined }));
                     }
                   }}
                 />
               </div>
               <div className="mode-control" role="group" aria-label="图谱查看模式">
-                <button className={filters.mode === 'overview' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'overview' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                <button className={filters.mode === 'overview' ? 'active' : ''} onClick={() => setGlobalMode('overview')}>
                   总览
                 </button>
-                <button className={filters.mode === 'search' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'search' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                <button className={filters.mode === 'search' ? 'active' : ''} onClick={() => setGlobalMode('search')}>
                   搜索
                 </button>
-                <button className={filters.mode === 'file' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'file' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                <button className={filters.mode === 'file' ? 'active' : ''} onClick={() => setGlobalMode('file')}>
                   文件
                 </button>
               </div>
@@ -229,8 +284,10 @@ export function App(): JSX.Element {
             <GraphCanvas
               snapshot={snapshot}
               selectedNodeId={selectedNodeId}
+              focusNodeId={filters.mode === 'node' ? filters.focusNodeId : undefined}
               activeProject={activeProject}
               onSelect={setSelectedNodeId}
+              onFocusNode={focusNodeGraph}
               onBuild={() => void runAndRefresh(window.codegraphClient.buildGraph)}
             />
           </div>
@@ -267,6 +324,13 @@ export function App(): JSX.Element {
   );
 }
 
+function getViewLabel(filters: FilterState, focusNode: GraphSnapshot['nodes'][number] | null): string {
+  if (filters.mode === 'node') return `聚焦：${focusNode?.name ?? filters.focusNodeId ?? '节点'}`;
+  if (filters.mode === 'search') return '搜索视图';
+  if (filters.mode === 'file') return '文件视图';
+  return '总览视图';
+}
+
 function StatsPanel({ project, snapshot }: { project: ProjectInfo | null; snapshot: GraphSnapshot | null }): JSX.Element {
   const status = project?.status;
   if (!status) return <p className="muted">尚未加载状态。</p>;
@@ -284,14 +348,18 @@ function StatsPanel({ project, snapshot }: { project: ProjectInfo | null; snapsh
 function GraphCanvas({
   snapshot,
   selectedNodeId,
+  focusNodeId,
   activeProject,
   onSelect,
+  onFocusNode,
   onBuild,
 }: {
   snapshot: GraphSnapshot | null;
   selectedNodeId: string | null;
+  focusNodeId?: string;
   activeProject: ProjectInfo | null;
   onSelect: (id: string) => void;
+  onFocusNode: (id: string) => void;
   onBuild: () => void;
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -300,9 +368,13 @@ function GraphCanvas({
   const layout = useMemo(() => {
     if (!snapshot) return null;
     const nodeCount = Math.max(1, snapshot.nodes.length);
+    if (focusNodeId) {
+      const spread = Math.max(0.74, Math.sqrt(nodeCount / 90));
+      return createGraphLayout(snapshot, Math.round(1500 * spread), Math.round(1000 * spread), { focusNodeId });
+    }
     const spread = Math.sqrt(nodeCount / 180);
     return createGraphLayout(snapshot, Math.round(2200 * spread), Math.round(1500 * spread));
-  }, [snapshot]);
+  }, [focusNodeId, snapshot]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -350,8 +422,8 @@ function GraphCanvas({
     canvas.width = Math.floor(rect.width * dpr);
     canvas.height = Math.floor(rect.height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawGraph(ctx, layout, viewport, selectedNodeId);
-  }, [layout, selectedNodeId, viewport]);
+    drawGraph(ctx, layout, viewport, selectedNodeId, focusNodeId);
+  }, [focusNodeId, layout, selectedNodeId, viewport]);
 
   if (!snapshot) {
     if (activeProject && activeProject.status && !activeProject.status.initialized) {
@@ -388,14 +460,26 @@ function GraphCanvas({
           const rect = canvasRef.current.getBoundingClientRect();
           const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
           const y = (event.clientY - rect.top - viewport.y) / viewport.scale;
-          const hit = [...layout.nodes].reverse().find((node) => Math.hypot(node.x - x, node.y - y) <= node.radius + 4);
+          const hit = findHitNode(layout.nodes, x, y);
           if (hit) onSelect(hit.id);
         }
         setDrag(null);
       }}
+      onDoubleClick={(event) => {
+        if (!layout || !canvasRef.current) return;
+        const rect = canvasRef.current.getBoundingClientRect();
+        const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
+        const y = (event.clientY - rect.top - viewport.y) / viewport.scale;
+        const hit = findHitNode(layout.nodes, x, y);
+        if (hit) onFocusNode(hit.id);
+      }}
       onMouseLeave={() => setDrag(null)}
     />
   );
+}
+
+function findHitNode(nodes: ReturnType<typeof createGraphLayout>['nodes'], x: number, y: number) {
+  return [...nodes].reverse().find((node) => Math.hypot(node.x - x, node.y - y) <= node.radius + 6);
 }
 
 function drawGraph(
@@ -403,6 +487,7 @@ function drawGraph(
   layout: ReturnType<typeof createGraphLayout>,
   viewport: { scale: number; x: number; y: number },
   selectedNodeId: string | null,
+  focusNodeId?: string,
 ): void {
   const canvas = ctx.canvas;
   const width = canvas.clientWidth;
@@ -417,11 +502,12 @@ function drawGraph(
   const importantNodeIds = new Set(
     [...layout.nodes]
       .sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name))
-      .slice(0, selectedNodeId ? 12 : 18)
+      .slice(0, focusNodeId ? 28 : selectedNodeId ? 12 : 18)
       .map((node) => node.id),
   );
   const selectedNode = selectedNodeId ? layout.nodes.find((node) => node.id === selectedNodeId) : null;
-  const shouldThinEdges = viewport.scale < 0.9 && selectedNode;
+  const focusNode = focusNodeId ? layout.nodes.find((node) => node.id === focusNodeId) : null;
+  const shouldThinEdges = !focusNode && viewport.scale < 0.9 && selectedNode;
 
   ctx.lineWidth = 1 / viewport.scale;
   for (const edge of layout.edges) {
@@ -429,8 +515,10 @@ function drawGraph(
       continue;
     }
     const connectedToSelection = selectedNode && (edge.source.id === selectedNode.id || edge.target.id === selectedNode.id);
-    const alpha = connectedToSelection ? 0.32 : edge.kind === 'calls' ? 0.12 : 0.08;
-    ctx.strokeStyle = edge.kind === 'calls' ? `rgba(76, 150, 255, ${alpha})` : `rgba(113, 128, 150, ${alpha})`;
+    const connectedToFocus = focusNode && (edge.source.id === focusNode.id || edge.target.id === focusNode.id);
+    const alpha = focusNode ? 0.48 : connectedToSelection ? 0.32 : edge.kind === 'calls' ? 0.12 : 0.08;
+    ctx.lineWidth = (connectedToFocus ? 1.6 : 1) / viewport.scale;
+    ctx.strokeStyle = edgeColor(edge, focusNode?.id, alpha);
     ctx.beginPath();
     ctx.moveTo(edge.source.x, edge.source.y);
     ctx.lineTo(edge.target.x, edge.target.y);
@@ -441,24 +529,36 @@ function drawGraph(
   ctx.textBaseline = 'middle';
   for (const node of layout.nodes) {
     const selected = node.id === selectedNodeId;
+    const focused = node.id === focusNodeId;
     const scaledRadius = node.radius / Math.sqrt(Math.max(1, viewport.scale));
-    const displayRadius = selected ? scaledRadius + 2.5 : scaledRadius;
+    const displayRadius = focused ? scaledRadius + 4 : selected ? scaledRadius + 2.5 : scaledRadius;
     ctx.fillStyle = nodeColor(node.kind);
-    ctx.strokeStyle = selected ? '#ffffff' : 'rgba(232, 237, 244, 0.6)';
-    ctx.lineWidth = (selected ? 2.2 : 1) / viewport.scale;
+    ctx.strokeStyle = focused ? '#ffffff' : selected ? '#d8e2ef' : 'rgba(232, 237, 244, 0.6)';
+    ctx.lineWidth = (focused ? 3 : selected ? 2.2 : 1) / viewport.scale;
     ctx.beginPath();
     ctx.arc(node.x, node.y, displayRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    if (selected || (importantNodeIds.has(node.id) && viewport.scale >= 0.55)) {
-      ctx.font = `${selected ? 13 / viewport.scale : 11 / viewport.scale}px Inter, sans-serif`;
+    if (focused || selected || (importantNodeIds.has(node.id) && (focusNodeId || viewport.scale >= 0.55))) {
+      ctx.font = `${focused || selected ? 13 / viewport.scale : 11 / viewport.scale}px Inter, sans-serif`;
       ctx.fillStyle = '#d8e2ef';
       ctx.fillText(node.name.slice(0, 32), node.x + displayRadius + 6 / viewport.scale, node.y);
     }
   }
 
   ctx.restore();
+}
+
+function edgeColor(
+  edge: ReturnType<typeof createGraphLayout>['edges'][number],
+  focusNodeId: string | undefined,
+  alpha: number,
+): string {
+  if (focusNodeId && edge.source.id === focusNodeId) return `rgba(76, 150, 255, ${alpha})`;
+  if (focusNodeId && edge.target.id === focusNodeId) return `rgba(47, 191, 113, ${alpha})`;
+  if (edge.kind === 'calls') return `rgba(76, 150, 255, ${alpha})`;
+  return `rgba(113, 128, 150, ${alpha})`;
 }
 
 function nodeColor(kind: string): string {

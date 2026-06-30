@@ -236,6 +236,28 @@ button:disabled {
   font-size: 12px;
 }
 
+.graph-back-button {
+  flex: 0 0 auto;
+  min-width: 120px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.view-chip {
+  flex: 0 0 auto;
+  max-width: 220px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border: 1px solid #2d3542;
+  border-radius: 6px;
+  color: #cbd5e1;
+  background: #151a21;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .graph-canvas {
   width: 100%;
   height: 100%;

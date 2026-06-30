@@ -77,9 +77,12 @@ export type GraphEdge = {
 };
 
 export type GraphSnapshotOptions = {
-  mode: 'overview' | 'search' | 'file';
+  mode: 'overview' | 'search' | 'file' | 'node';
   query?: string;
   filePath?: string;
+  focusNodeId?: string;
+  focusDepth?: 1 | 2;
+  focusDirection?: 'both' | 'incoming' | 'outgoing';
   maxNodes: number;
   nodeKinds: string[];
   edgeKinds: string[];
