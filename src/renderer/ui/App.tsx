@@ -92,8 +92,10 @@ export function App(): JSX.Element {
     const job = await run(activePath);
     setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
     await refreshStatus(activePath);
-    if (job.state === 'succeeded') {
+    if (job.state === 'succeeded' && job.kind !== 'delete') {
       await refreshSnapshot();
+    } else if (job.kind === 'delete') {
+      setSnapshot(null);
     }
   }
 

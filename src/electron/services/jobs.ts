@@ -12,9 +12,14 @@ type JobRequest = {
   run: (context: RunContext) => Promise<unknown>;
 };
 
-class JobRunner {
+export class JobRunner {
   private jobs = new Map<string, JobSnapshot>();
   private activeProjectJobs = new Set<string>();
+  private readonly broadcaster: (channel: string, payload: unknown) => void;
+
+  constructor(broadcaster = defaultBroadcaster) {
+    this.broadcaster = broadcaster;
+  }
 
   async run(request: JobRequest): Promise<JobSnapshot> {
     const job = this.createJob(request.kind, request.projectPath);
@@ -51,7 +56,7 @@ class JobRunner {
     const appendLog = (stream: JobLog['stream'], text: string): void => {
       const log = { jobId: job.id, stream, text, createdAt: Date.now() };
       job.logs.push(log);
-      BrowserWindow.getAllWindows().forEach((window) => window.webContents.send('job:log', log));
+      this.broadcaster('job:log', log);
     };
 
     try {
@@ -72,8 +77,12 @@ class JobRunner {
   }
 
   private broadcastJob(job: JobSnapshot): void {
-    BrowserWindow.getAllWindows().forEach((window) => window.webContents.send('job:updated', job));
+    this.broadcaster('job:updated', job);
   }
 }
 
 export const jobRunner = new JobRunner();
+
+function defaultBroadcaster(channel: string, payload: unknown): void {
+  BrowserWindow.getAllWindows().forEach((window) => window.webContents.send(channel, payload));
+}

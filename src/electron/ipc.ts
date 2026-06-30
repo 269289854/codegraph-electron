@@ -1,8 +1,8 @@
 import { dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import {
-  createUnavailableStatus,
   detectCodeGraphInstall,
+  readCodeGraphStatus,
   runCodeGraphCommand,
   startOfficialInstall,
 } from './services/codegraph.js';
@@ -33,9 +33,7 @@ ipcMain.handle('project:select', async () => {
   const project = {
     path: projectPath,
     name: path.basename(projectPath),
-    status: await runCodeGraphCommand(projectPath, ['status', projectPath, '--json']).catch(() =>
-      createUnavailableStatus(projectPath),
-    ),
+    status: await readCodeGraphStatus(projectPath),
   };
   await upsertRecentProject(project);
   return project;
@@ -44,10 +42,7 @@ ipcMain.handle('project:select', async () => {
 ipcMain.handle('project:recent', async () => readRecentProjects());
 
 ipcMain.handle('project:status', async (_event, projectPath: string) => {
-  const status = await runCodeGraphCommand(projectPath, ['status', projectPath, '--json']).catch((error: unknown) => ({
-    ...createUnavailableStatus(projectPath),
-    error: error instanceof Error ? error.message : String(error),
-  }));
+  const status = await readCodeGraphStatus(projectPath);
   await upsertRecentProject({ path: projectPath, name: path.basename(projectPath), status });
   return status;
 });

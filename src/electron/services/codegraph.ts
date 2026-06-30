@@ -91,6 +91,17 @@ export async function runCodeGraphCommand(
   return runCodeGraphCommand(projectPath, ['status', projectPath, '--json']);
 }
 
+export async function readCodeGraphStatus(projectPath: string): Promise<ProjectStatus> {
+  try {
+    return await runCodeGraphCommand(projectPath, ['status', projectPath, '--json']);
+  } catch (error) {
+    return {
+      ...createUnavailableStatus(projectPath),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export function createUnavailableStatus(projectPath: string): ProjectStatus {
   return {
     initialized: false,
