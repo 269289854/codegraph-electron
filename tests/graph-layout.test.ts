@@ -75,6 +75,8 @@ describe('graph layout', () => {
     expect(center?.x).toBeCloseTo(500);
     expect(center?.y).toBeCloseTo(350);
     expect(layout.edges).toHaveLength(2);
+    expect(layout.nodes.find((item) => item.id === 'incoming')?.x).toBeLessThan(center?.x ?? 0);
+    expect(layout.nodes.find((item) => item.id === 'outgoing')?.x).toBeGreaterThan(center?.x ?? 0);
   });
 });
 

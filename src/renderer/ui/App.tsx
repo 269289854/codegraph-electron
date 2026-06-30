@@ -9,6 +9,8 @@ type FilterState = GraphSnapshotOptions & {
   filePath: string;
 };
 
+const focusedMaxNodes = 48;
+
 const defaultFilters: FilterState = {
   mode: 'overview' as const,
   query: '',
@@ -89,7 +91,10 @@ export function App(): JSX.Element {
 
   const refreshSnapshot = useCallback(async (): Promise<void> => {
     if (!activePath) return;
-    const graph = await window.codegraphClient.getGraphSnapshot(activePath, filters);
+    const snapshotOptions = filters.mode === 'node'
+      ? { ...filters, maxNodes: Math.min(filters.maxNodes, focusedMaxNodes) }
+      : filters;
+    const graph = await window.codegraphClient.getGraphSnapshot(activePath, snapshotOptions);
     setSnapshot(graph);
     setSelectedNodeId(filters.mode === 'node' ? filters.focusNodeId ?? graph.nodes[0]?.id ?? null : graph.nodes[0]?.id ?? null);
   }, [activePath, filters]);
@@ -119,7 +124,7 @@ export function App(): JSX.Element {
   const canBuild = Boolean(activePath && !status?.initialized);
   const canUseGraph = Boolean(activePath && status?.initialized);
   const jobList = useMemo(() => jobs.slice(0, 8), [jobs]);
-  const viewLabel = getViewLabel(filters, focusNode);
+  const viewLabel = getViewLabel(filters, focusNode, snapshot);
 
   function setGlobalMode(mode: 'overview' | 'search' | 'file'): void {
     setViewHistory([]);
@@ -324,8 +329,12 @@ export function App(): JSX.Element {
   );
 }
 
-function getViewLabel(filters: FilterState, focusNode: GraphSnapshot['nodes'][number] | null): string {
-  if (filters.mode === 'node') return `聚焦：${focusNode?.name ?? filters.focusNodeId ?? '节点'}`;
+function getViewLabel(
+  filters: FilterState,
+  focusNode: GraphSnapshot['nodes'][number] | null,
+  snapshot: GraphSnapshot | null,
+): string {
+  if (filters.mode === 'node') return `聚焦：${focusNode?.name ?? filters.focusNodeId ?? '节点'} · ${snapshot?.nodes.length ?? 0} 个节点`;
   if (filters.mode === 'search') return '搜索视图';
   if (filters.mode === 'file') return '文件视图';
   return '总览视图';
@@ -364,13 +373,19 @@ function GraphCanvas({
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
-  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<{
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    isPanning: boolean;
+    moved: boolean;
+  } | null>(null);
   const layout = useMemo(() => {
     if (!snapshot) return null;
     const nodeCount = Math.max(1, snapshot.nodes.length);
     if (focusNodeId) {
-      const spread = Math.max(0.74, Math.sqrt(nodeCount / 90));
-      return createGraphLayout(snapshot, Math.round(1500 * spread), Math.round(1000 * spread), { focusNodeId });
+      return createGraphLayout(snapshot, 1000, 700, { focusNodeId });
     }
     const spread = Math.sqrt(nodeCount / 180);
     return createGraphLayout(snapshot, Math.round(2200 * spread), Math.round(1500 * spread));
@@ -445,18 +460,42 @@ function GraphCanvas({
     <canvas
       ref={canvasRef}
       className="graph-canvas"
-      onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY })}
+      onMouseDown={(event) =>
+        setDrag({
+          startX: event.clientX,
+          startY: event.clientY,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          isPanning: event.ctrlKey,
+          moved: false,
+        })
+      }
       onMouseMove={(event) => {
         if (!drag) return;
-        setViewport({ ...viewport, x: viewport.x + event.clientX - drag.x, y: viewport.y + event.clientY - drag.y });
-        setDrag({ x: event.clientX, y: event.clientY });
+        const moved =
+          drag.moved ||
+          Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) >= 4;
+        if (!drag.isPanning) {
+          setDrag({ ...drag, lastX: event.clientX, lastY: event.clientY, moved });
+          return;
+        }
+        if (!event.ctrlKey) {
+          setDrag(null);
+          return;
+        }
+        setViewport((current) => ({
+          ...current,
+          x: current.x + event.clientX - drag.lastX,
+          y: current.y + event.clientY - drag.lastY,
+        }));
+        setDrag({ ...drag, lastX: event.clientX, lastY: event.clientY, moved });
       }}
       onMouseUp={(event) => {
         if (!layout || !canvasRef.current) {
           setDrag(null);
           return;
         }
-        if (drag && Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) < 4) {
+        if (drag && !drag.moved) {
           const rect = canvasRef.current.getBoundingClientRect();
           const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
           const y = (event.clientY - rect.top - viewport.y) / viewport.scale;

@@ -100,8 +100,6 @@ function createFocusedGraphLayout(snapshot: GraphSnapshot, width: number, height
       const bConnected = connectedIds.has(b.id) ? 1 : 0;
       return bConnected - aConnected || b.degree - a.degree || a.name.localeCompare(b.name);
     });
-  const maxRingRadiusX = Math.max(260, width * 0.36);
-  const maxRingRadiusY = Math.max(210, height * 0.34);
   const nodes: LayoutNode[] = [
     {
       ...focusNode,
@@ -112,13 +110,12 @@ function createFocusedGraphLayout(snapshot: GraphSnapshot, width: number, height
   ];
 
   neighborNodes.forEach((node, index) => {
-    const angle = focusedAngle(node.id, incomingIds, outgoingIds, index);
-    const ring = 0.72 + (index % 3) * 0.14;
+    const position = focusedPosition(node.id, incomingIds, outgoingIds, index, width, height);
     const degreeRadius = 3.2 + Math.log2(Math.max(1, node.degree) + 1) * 0.95 * (kindWeight[node.kind] ?? 1);
     nodes.push({
       ...node,
-      x: centerX + Math.cos(angle) * maxRingRadiusX * ring,
-      y: centerY + Math.sin(angle) * maxRingRadiusY * ring,
+      x: centerX + position.x,
+      y: centerY + position.y,
       radius: Math.max(4, Math.min(9, degreeRadius)),
     });
   });
@@ -135,19 +132,30 @@ function createFocusedGraphLayout(snapshot: GraphSnapshot, width: number, height
   return { nodes, edges, width, height };
 }
 
-function focusedAngle(
+function focusedPosition(
   nodeId: string,
   incomingIds: Set<string>,
   outgoingIds: Set<string>,
   index: number,
-): number {
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const columnX = Math.max(220, width * 0.28);
+  const rowGap = Math.max(46, Math.min(70, height / 11));
+  const row = Math.floor(index / 2);
+  const y = (row - 5) * rowGap + (index % 2) * rowGap * 0.45;
+
   if (outgoingIds.has(nodeId) && !incomingIds.has(nodeId)) {
-    return -Math.PI / 5 + (index % 18) * (Math.PI / 28);
+    return { x: columnX, y };
   }
   if (incomingIds.has(nodeId) && !outgoingIds.has(nodeId)) {
-    return Math.PI - Math.PI / 5 + (index % 18) * (Math.PI / 28);
+    return { x: -columnX, y };
   }
-  return goldenAngle(index);
+  const angle = goldenAngle(index);
+  return {
+    x: Math.cos(angle) * Math.max(120, width * 0.18),
+    y: Math.sin(angle) * Math.max(100, height * 0.18),
+  };
 }
 
 function goldenAngle(index: number): number {

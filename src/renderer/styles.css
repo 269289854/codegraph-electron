@@ -263,11 +263,11 @@ button:disabled {
   height: 100%;
   min-height: 560px;
   background: #0f1318;
-  cursor: grab;
+  cursor: default;
 }
 
 .graph-canvas:active {
-  cursor: grabbing;
+  cursor: default;
 }
 
 .empty-graph {
