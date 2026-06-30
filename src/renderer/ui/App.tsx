@@ -104,6 +104,8 @@ export function App(): JSX.Element {
 
   const installLabel = install?.installed ? `CodeGraph ${install.version ?? ''}` : '未检测到 CodeGraph';
   const status = activeProject?.status;
+  const canBuild = Boolean(activePath && !status?.initialized);
+  const canUseGraph = Boolean(activePath && status?.initialized);
   const jobList = useMemo(() => jobs.slice(0, 8), [jobs]);
 
   return (
@@ -149,28 +151,28 @@ export function App(): JSX.Element {
             <strong>{activeProject?.name ?? '未选择项目'}</strong>
             <span>{activeProject?.path ?? '选择一个项目文件夹开始。'}</span>
           </div>
-          <div className="toolbar-actions">
-            <button disabled={!activePath || status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.buildGraph)}>
-              <GitBranch size={16} />
-              构建图谱
-            </button>
-            <button disabled={!activePath || !status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.rebuildGraph)}>
-              <RefreshCw size={16} />
-              重构图谱
-            </button>
-            <button disabled={!activePath || !status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.deleteGraph)}>
-              <Trash2 size={16} />
-              删除图谱
-            </button>
-            <button disabled={!activePath} onClick={() => void refreshStatus()}>
-              <Activity size={16} />
-              刷新状态
-            </button>
-          </div>
         </header>
 
         <section className="content">
           <div className="graph-area">
+            <div className="project-actions">
+              <button className="primary action-button" disabled={!canBuild} onClick={() => void runAndRefresh(window.codegraphClient.buildGraph)}>
+                <GitBranch size={16} />
+                开始构建图谱
+              </button>
+              <button className="secondary action-button" disabled={!canUseGraph} onClick={() => void runAndRefresh(window.codegraphClient.rebuildGraph)}>
+                <RefreshCw size={16} />
+                重构图谱
+              </button>
+              <button className="secondary action-button" disabled={!canUseGraph} onClick={() => void runAndRefresh(window.codegraphClient.deleteGraph)}>
+                <Trash2 size={16} />
+                删除图谱
+              </button>
+              <button className="secondary action-button" disabled={!activePath} onClick={() => void refreshStatus()}>
+                <Activity size={16} />
+                刷新状态
+              </button>
+            </div>
             <div className="graph-tools">
               <div className="search-box">
                 <Search size={16} />
@@ -199,15 +201,17 @@ export function App(): JSX.Element {
                   }}
                 />
               </div>
-              <button onClick={() => { setFilters({ ...filters, mode: 'overview' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                总览
-              </button>
-              <button onClick={() => { setFilters({ ...filters, mode: 'search' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                搜索
-              </button>
-              <button onClick={() => { setFilters({ ...filters, mode: 'file' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                文件
-              </button>
+              <div className="mode-control" role="group" aria-label="图谱查看模式">
+                <button className={filters.mode === 'overview' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'overview' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                  总览
+                </button>
+                <button className={filters.mode === 'search' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'search' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                  搜索
+                </button>
+                <button className={filters.mode === 'file' ? 'active' : ''} onClick={() => { setFilters({ ...filters, mode: 'file' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                  文件
+                </button>
+              </div>
               <label>
                 最大节点数
                 <input
@@ -221,7 +225,13 @@ export function App(): JSX.Element {
                 {filters.maxNodes}
               </label>
             </div>
-            <GraphCanvas snapshot={snapshot} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
+            <GraphCanvas
+              snapshot={snapshot}
+              selectedNodeId={selectedNodeId}
+              activeProject={activeProject}
+              onSelect={setSelectedNodeId}
+              onBuild={() => void runAndRefresh(window.codegraphClient.buildGraph)}
+            />
           </div>
 
           <aside className="inspector">
@@ -273,11 +283,15 @@ function StatsPanel({ project, snapshot }: { project: ProjectInfo | null; snapsh
 function GraphCanvas({
   snapshot,
   selectedNodeId,
+  activeProject,
   onSelect,
+  onBuild,
 }: {
   snapshot: GraphSnapshot | null;
   selectedNodeId: string | null;
+  activeProject: ProjectInfo | null;
   onSelect: (id: string) => void;
+  onBuild: () => void;
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
@@ -298,7 +312,19 @@ function GraphCanvas({
   }, [layout, selectedNodeId, viewport]);
 
   if (!snapshot) {
-    return <div className="empty-graph">请选择已构建图谱的项目。</div>;
+    if (activeProject && activeProject.status && !activeProject.status.initialized) {
+      return (
+        <div className="empty-graph">
+          <strong>当前项目还没有图谱</strong>
+          <span>点击下方按钮开始构建，完成后会自动刷新可视化视图。</span>
+          <button className="primary action-button" onClick={onBuild}>
+            <GitBranch size={16} />
+            开始构建图谱
+          </button>
+        </div>
+      );
+    }
+    return <div className="empty-graph">请选择项目文件夹，然后构建或查看图谱。</div>;
   }
 
   return (

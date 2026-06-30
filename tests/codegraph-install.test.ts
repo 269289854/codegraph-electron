@@ -26,7 +26,10 @@ describe('CodeGraph install detection', () => {
   });
 
   it('returns missing status when codegraph cannot be found', async () => {
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = 'C:\\definitely-missing-codegraph-test-dir';
     const status = await detectCodeGraphInstall(async () => ({ exitCode: 1, stdout: '', stderr: 'not found' }));
+    process.env.LOCALAPPDATA = originalLocalAppData;
 
     expect(status.installed).toBe(false);
     expect(status.commandPath).toBeNull();

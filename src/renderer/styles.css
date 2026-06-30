@@ -68,7 +68,7 @@ button:disabled {
 }
 
 .brand div,
-.toolbar div {
+.toolbar > div {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -135,12 +135,6 @@ button:disabled {
   padding: 0 18px;
 }
 
-.toolbar-actions {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-}
-
 .content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -150,19 +144,37 @@ button:disabled {
 .graph-area {
   min-width: 0;
   display: grid;
-  grid-template-rows: 54px 1fr;
+  grid-template-rows: auto auto 1fr;
+}
+
+.project-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #242a33;
+  overflow-x: auto;
+}
+
+.action-button {
+  min-width: 132px;
+  padding: 0 14px;
+  white-space: nowrap;
 }
 
 .graph-tools {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   padding: 10px 16px;
   border-bottom: 1px solid #242a33;
+  overflow-x: auto;
 }
 
 .search-box {
-  width: 360px;
+  flex: 1 1 260px;
+  min-width: 220px;
+  max-width: 360px;
   height: 34px;
   border: 1px solid #2d3542;
   border-radius: 6px;
@@ -174,7 +186,36 @@ button:disabled {
 }
 
 .search-box.compact {
-  width: 240px;
+  flex-basis: 220px;
+  max-width: 260px;
+}
+
+.mode-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 34px;
+  border: 1px solid #2d3542;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode-control button {
+  width: 58px;
+  height: 32px;
+  border: 0;
+  border-radius: 0;
+  border-right: 1px solid #2d3542;
+  white-space: nowrap;
+  padding: 0;
+}
+
+.mode-control button:last-child {
+  border-right: 0;
+}
+
+.mode-control button.active {
+  background: #2d6cdf;
+  color: #ffffff;
 }
 
 .search-box input {
@@ -187,6 +228,7 @@ button:disabled {
 }
 
 .graph-tools label {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -207,10 +249,24 @@ button:disabled {
 }
 
 .empty-graph {
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   color: #8d98a8;
   min-height: 560px;
+  text-align: center;
+  padding: 24px;
+}
+
+.empty-graph strong {
+  color: #e8edf4;
+  font-size: 18px;
+}
+
+.empty-graph span {
+  max-width: 420px;
 }
 
 .inspector {
