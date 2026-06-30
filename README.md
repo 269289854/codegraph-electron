@@ -9,7 +9,9 @@ Desktop management client for [CodeGraph](https://github.com/colbymchenry/codegr
 - Select local project folders and persist recent projects.
 - Build, rebuild, delete, and refresh CodeGraph indexes through the CLI.
 - Read `.codegraph/codegraph.db` in read-only mode and render a filtered graph view.
-- Explore overview, search, and file-focused graph snapshots with pan/zoom and node details.
+- Explore overview, search, file-focused, and node-focused graph snapshots with pan/zoom and node details.
+- Uses a Japanese anime-inspired app icon for the window, taskbar, shortcuts, and installer.
+- Runs as a single-instance desktop app; launching it again focuses the existing window.
 
 ## Development
 
@@ -27,6 +29,9 @@ The dev command starts the Vite renderer. Electron loads `http://127.0.0.1:5173`
 - `npm run test` - run core module tests.
 - `npm run build` - build renderer and Electron main/preload output.
 - `npm run package:dir` - create an unpacked Electron build.
+- `npm run package:win` - create a Windows x64 NSIS installer at `release/CodeGraph Manager-Setup-<version>-x64.exe`.
+
+The Windows installer supports choosing the installation directory and creates desktop/start-menu shortcuts.
 
 ## CodeGraph Commands
 
