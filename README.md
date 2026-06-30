@@ -2,12 +2,23 @@
 
 Desktop management client for [CodeGraph](https://github.com/colbymchenry/codegraph).
 
+## Features
+
+- Detect whether `codegraph` is installed from PATH or the standalone Windows bundle.
+- Install CodeGraph through the official PowerShell installer when it is missing.
+- Select local project folders and persist recent projects.
+- Build, rebuild, delete, and refresh CodeGraph indexes through the CLI.
+- Read `.codegraph/codegraph.db` in read-only mode and render a filtered graph view.
+- Explore overview, search, and file-focused graph snapshots with pan/zoom and node details.
+
 ## Development
 
 ```powershell
 npm install
 npm run dev
 ```
+
+The dev command starts the Vite renderer. Electron loads `http://127.0.0.1:5173` in development after the main process is compiled by TypeScript during build/package flows.
 
 ## Scripts
 
@@ -16,3 +27,14 @@ npm run dev
 - `npm run test` - run core module tests.
 - `npm run build` - build renderer and Electron main/preload output.
 - `npm run package:dir` - create an unpacked Electron build.
+
+## CodeGraph Commands
+
+The app intentionally shells out to the installed CLI instead of mutating `.codegraph` directly:
+
+- Build graph: `codegraph init <projectPath>`
+- Rebuild graph: `codegraph index <projectPath>`
+- Delete graph: `codegraph uninit <projectPath> --force`
+- Status: `codegraph status <projectPath> --json`
+
+Graph visualization reads `<projectPath>/.codegraph/codegraph.db` with `sql.js` from the Electron main process. Renderer code only talks through the preload IPC bridge.

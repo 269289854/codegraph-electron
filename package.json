@@ -5,7 +5,7 @@
   "author": "269289854",
   "license": "MIT",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/electron/main.js",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "npm run typecheck && vite build && tsc -p tsconfig.electron.json",
