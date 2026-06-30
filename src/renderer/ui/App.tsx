@@ -38,7 +38,19 @@ export function App(): JSX.Element {
     const offJob = window.codegraphClient.onJobUpdated((job) => {
       setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
     });
-    return () => offJob();
+    const offLog = window.codegraphClient.onJobLog((log) => {
+      setJobs((existing) =>
+        existing.map((job) =>
+          job.id === log.jobId
+            ? { ...job, logs: [...job.logs, { ...log, stream: log.stream as 'stdout' | 'stderr' | 'system' }] }
+            : job,
+        ),
+      );
+    });
+    return () => {
+      offJob();
+      offLog();
+    };
   }, []);
 
   async function refreshInstall(): Promise<void> {

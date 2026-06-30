@@ -5,18 +5,33 @@ import path from 'node:path';
 import type { InstallStatus, JobLog, ProjectStatus } from '../../shared/types.js';
 import { parseStatusJson } from './status-parser.js';
 
+type CommandResult = { exitCode: number | null; stdout: string; stderr: string };
+type CommandRunner = (command: string, args: string[], cwd?: string) => Promise<CommandResult>;
+
+export const officialInstallCommand = {
+  command: 'powershell.exe',
+  args: [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    'irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex',
+  ],
+};
+
 export function bundledCodeGraphPath(): string | null {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) return null;
   return path.join(localAppData, 'codegraph', 'current', 'bin', process.platform === 'win32' ? 'codegraph.cmd' : 'codegraph');
 }
 
-export async function detectCodeGraphInstall(): Promise<InstallStatus> {
-  const fromPath = await findCodeGraphOnPath();
+export async function detectCodeGraphInstall(runner?: CommandRunner): Promise<InstallStatus> {
+  const run = runner ?? ((command, args) => spawnCommand(command, args));
+  const fromPath = await findCodeGraphOnPath(run);
   const bundled = bundledCodeGraphPath();
   const bundledExists = bundled ? await exists(bundled) : false;
   const commandPath = fromPath ?? (bundledExists ? bundled : null);
-  const version = commandPath ? await readCodeGraphVersion(commandPath) : null;
+  const version = commandPath ? await readCodeGraphVersion(commandPath, run) : null;
 
   return {
     installed: Boolean(commandPath),
@@ -32,9 +47,8 @@ export async function startOfficialInstall(
   sender: WebContents,
   appendLog: (stream: JobLog['stream'], text: string) => void,
 ): Promise<ProjectStatus> {
-  const script = 'irm https://raw.githubusercontent.com/colbymchenry/codegraph/main/install.ps1 | iex';
   appendLog('system', 'Starting official CodeGraph standalone installer.');
-  const result = await spawnCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+  const result = await spawnCommand(officialInstallCommand.command, officialInstallCommand.args, {
     cwd: process.env.USERPROFILE ?? process.cwd(),
     sender,
     jobId,
@@ -95,15 +109,15 @@ export function createUnavailableStatus(projectPath: string): ProjectStatus {
   };
 }
 
-async function findCodeGraphOnPath(): Promise<string | null> {
+async function findCodeGraphOnPath(run: CommandRunner): Promise<string | null> {
   const command = process.platform === 'win32' ? 'where.exe' : 'which';
-  const result = await spawnCommand(command, ['codegraph']).catch(() => null);
+  const result = await run(command, ['codegraph']).catch(() => null);
   if (!result || result.exitCode !== 0) return null;
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
 }
 
-async function readCodeGraphVersion(commandPath: string): Promise<string | null> {
-  const result = await spawnCommand(commandPath, ['version']).catch(() => null);
+async function readCodeGraphVersion(commandPath: string, run: CommandRunner): Promise<string | null> {
+  const result = await run(commandPath, ['version']).catch(() => null);
   if (!result || result.exitCode !== 0) return null;
   return result.stdout.trim() || null;
 }

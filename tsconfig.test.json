@@ -2,6 +2,7 @@
   "extends": "./tsconfig.electron.json",
   "compilerOptions": {
     "noEmit": true,
+    "rootDir": ".",
     "types": ["node", "vitest"]
   },
   "include": ["src/electron", "src/shared", "src/types", "tests"]
