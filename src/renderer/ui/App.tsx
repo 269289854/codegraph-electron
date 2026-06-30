@@ -1,5 +1,6 @@
 import { Activity, Box, FolderOpen, GitBranch, RefreshCw, Search, Trash2, Wrench } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createGraphLayout } from '../../shared/graph-layout';
 import type { GraphSnapshot, GraphSnapshotOptions, InstallStatus, JobSnapshot, ProjectInfo } from '../../shared/types';
 
 type FilterState = GraphSnapshotOptions & {
@@ -173,12 +174,37 @@ export function App(): JSX.Element {
                 <input
                   placeholder="Search nodes"
                   value={filters.query}
-                  onChange={(event) => setFilters({ ...filters, query: event.target.value, mode: 'search' })}
+                  onChange={(event) => setFilters({ ...filters, query: event.target.value })}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') void refreshSnapshot();
+                    if (event.key === 'Enter') {
+                      setFilters((current) => ({ ...current, mode: 'search' }));
+                      window.setTimeout(() => void refreshSnapshot(), 0);
+                    }
                   }}
                 />
               </div>
+              <div className="search-box compact">
+                <input
+                  placeholder="Focus file prefix"
+                  value={filters.filePath}
+                  onChange={(event) => setFilters({ ...filters, filePath: event.target.value })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      setFilters((current) => ({ ...current, mode: 'file' }));
+                      window.setTimeout(() => void refreshSnapshot(), 0);
+                    }
+                  }}
+                />
+              </div>
+              <button onClick={() => { setFilters({ ...filters, mode: 'overview' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                Overview
+              </button>
+              <button onClick={() => { setFilters({ ...filters, mode: 'search' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                Search
+              </button>
+              <button onClick={() => { setFilters({ ...filters, mode: 'file' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
+                File
+              </button>
               <label>
                 Max nodes
                 <input
@@ -250,41 +276,111 @@ function GraphCanvas({
   selectedNodeId: string | null;
   onSelect: (id: string) => void;
 }): JSX.Element {
-  const nodes = useMemo(() => snapshot?.nodes ?? [], [snapshot?.nodes]);
-  const edges = snapshot?.edges ?? [];
-  const positions = useMemo(() => {
-    const map = new Map<string, { x: number; y: number }>();
-    const radius = Math.max(160, Math.min(340, nodes.length * 1.2));
-    nodes.forEach((node, index) => {
-      const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1);
-      const ring = radius * (0.45 + (index % 5) * 0.12);
-      map.set(node.id, { x: 460 + Math.cos(angle) * ring, y: 320 + Math.sin(angle) * ring });
-    });
-    return map;
-  }, [nodes]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const layout = useMemo(() => (snapshot ? createGraphLayout(snapshot, 1200, 780) : null), [snapshot]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !layout) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawGraph(ctx, layout, viewport, selectedNodeId);
+  }, [layout, selectedNodeId, viewport]);
 
   if (!snapshot) {
     return <div className="empty-graph">Select an initialized project to view its graph.</div>;
   }
 
   return (
-    <svg className="graph-canvas" viewBox="0 0 920 640" role="img">
-      {edges.map((edge) => {
-        const source = positions.get(edge.source);
-        const target = positions.get(edge.target);
-        if (!source || !target) return null;
-        return <line key={edge.id} x1={source.x} y1={source.y} x2={target.x} y2={target.y} className="edge" />;
-      })}
-      {nodes.map((node) => {
-        const point = positions.get(node.id)!;
-        const selected = selectedNodeId === node.id;
-        return (
-          <g key={node.id} transform={`translate(${point.x}, ${point.y})`} onClick={() => onSelect(node.id)}>
-            <circle r={selected ? 9 : 6} className={`node ${node.kind}`} />
-            <text x="11" y="4">{node.name.slice(0, 28)}</text>
-          </g>
-        );
-      })}
-    </svg>
+    <canvas
+      ref={canvasRef}
+      className="graph-canvas"
+      onWheel={(event) => {
+        event.preventDefault();
+        const nextScale = Math.max(0.35, Math.min(2.5, viewport.scale + (event.deltaY > 0 ? -0.08 : 0.08)));
+        setViewport({ ...viewport, scale: nextScale });
+      }}
+      onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY })}
+      onMouseMove={(event) => {
+        if (!drag) return;
+        setViewport({ ...viewport, x: viewport.x + event.clientX - drag.x, y: viewport.y + event.clientY - drag.y });
+        setDrag({ x: event.clientX, y: event.clientY });
+      }}
+      onMouseUp={(event) => {
+        if (!layout || !canvasRef.current) {
+          setDrag(null);
+          return;
+        }
+        if (drag && Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) < 4) {
+          const rect = canvasRef.current.getBoundingClientRect();
+          const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
+          const y = (event.clientY - rect.top - viewport.y) / viewport.scale;
+          const hit = [...layout.nodes].reverse().find((node) => Math.hypot(node.x - x, node.y - y) <= node.radius + 4);
+          if (hit) onSelect(hit.id);
+        }
+        setDrag(null);
+      }}
+      onMouseLeave={() => setDrag(null)}
+    />
   );
+}
+
+function drawGraph(
+  ctx: CanvasRenderingContext2D,
+  layout: ReturnType<typeof createGraphLayout>,
+  viewport: { scale: number; x: number; y: number },
+  selectedNodeId: string | null,
+): void {
+  const canvas = ctx.canvas;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#0f1318';
+  ctx.fillRect(0, 0, width, height);
+  ctx.save();
+  ctx.translate(viewport.x, viewport.y);
+  ctx.scale(viewport.scale, viewport.scale);
+
+  ctx.lineWidth = 1;
+  for (const edge of layout.edges) {
+    ctx.strokeStyle = edge.kind === 'calls' ? 'rgba(76, 150, 255, 0.33)' : 'rgba(113, 128, 150, 0.24)';
+    ctx.beginPath();
+    ctx.moveTo(edge.source.x, edge.source.y);
+    ctx.lineTo(edge.target.x, edge.target.y);
+    ctx.stroke();
+  }
+
+  ctx.font = '11px Inter, sans-serif';
+  ctx.textBaseline = 'middle';
+  for (const node of layout.nodes) {
+    const selected = node.id === selectedNodeId;
+    ctx.fillStyle = nodeColor(node.kind);
+    ctx.strokeStyle = selected ? '#ffffff' : 'rgba(232, 237, 244, 0.6)';
+    ctx.lineWidth = selected ? 2.5 : 1;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, selected ? node.radius + 3 : node.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    if (selected || node.degree > 3) {
+      ctx.fillStyle = '#d8e2ef';
+      ctx.fillText(node.name.slice(0, 32), node.x + node.radius + 6, node.y);
+    }
+  }
+
+  ctx.restore();
+}
+
+function nodeColor(kind: string): string {
+  if (kind === 'file') return '#2fbf71';
+  if (kind === 'class' || kind === 'interface' || kind === 'struct') return '#e4b84a';
+  if (kind === 'method' || kind === 'function') return '#eb6f92';
+  return '#4c96ff';
 }

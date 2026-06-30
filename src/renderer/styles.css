@@ -166,6 +166,10 @@ button:disabled {
   background: #151a21;
 }
 
+.search-box.compact {
+  width: 240px;
+}
+
 .search-box input {
   min-width: 0;
   flex: 1;
@@ -188,6 +192,11 @@ button:disabled {
   height: 100%;
   min-height: 560px;
   background: #0f1318;
+  cursor: grab;
+}
+
+.graph-canvas:active {
+  cursor: grabbing;
 }
 
 .empty-graph {
@@ -195,39 +204,6 @@ button:disabled {
   place-items: center;
   color: #8d98a8;
   min-height: 560px;
-}
-
-.edge {
-  stroke: #2d405a;
-  stroke-width: 1;
-  opacity: 0.65;
-}
-
-.node {
-  fill: #4c96ff;
-  stroke: #e8edf4;
-  stroke-width: 1;
-  cursor: pointer;
-}
-
-.node.file {
-  fill: #2fbf71;
-}
-
-.node.class,
-.node.interface {
-  fill: #e4b84a;
-}
-
-.node.method,
-.node.function {
-  fill: #eb6f92;
-}
-
-text {
-  fill: #cbd5e1;
-  font-size: 10px;
-  pointer-events: none;
 }
 
 .inspector {
