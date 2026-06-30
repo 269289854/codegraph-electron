@@ -13,5 +13,6 @@
     "rootDir": "src",
     "types": ["node", "electron"]
   },
-  "include": ["src/electron", "src/shared", "src/types"]
+  "include": ["src/electron", "src/shared", "src/types"],
+  "exclude": ["src/electron/preload.ts"]
 }
