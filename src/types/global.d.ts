@@ -21,6 +21,7 @@ declare global {
       rebuildGraph: (projectPath: string) => Promise<JobSnapshot>;
       deleteGraph: (projectPath: string) => Promise<JobSnapshot>;
       getGraphSnapshot: (projectPath: string, options: GraphSnapshotOptions) => Promise<GraphSnapshot>;
+      getRuntimeLogPath: () => Promise<string>;
       onJobUpdated: (callback: (job: JobSnapshot) => void) => () => void;
       onJobLog: (callback: (log: { jobId: string; stream: string; text: string; createdAt: number }) => void) => () => void;
     };

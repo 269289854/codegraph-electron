@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron';
 import type { JobKind, JobLog, JobSnapshot } from '../../shared/types.js';
+import { logError, logInfo } from './runtime-logger.js';
 
 type RunContext = {
   job: JobSnapshot;
@@ -23,6 +24,7 @@ export class JobRunner {
 
   async run(request: JobRequest): Promise<JobSnapshot> {
     const job = this.createJob(request.kind, request.projectPath);
+    logInfo('Job started', { id: job.id, kind: job.kind, projectPath: job.projectPath });
     return this.execute(job, request.run);
   }
 
@@ -63,10 +65,12 @@ export class JobRunner {
       await run({ job, appendLog });
       job.state = 'succeeded';
       job.exitCode = 0;
+      logInfo('Job succeeded', { id: job.id, kind: job.kind, projectPath: job.projectPath });
     } catch (error) {
       job.state = 'failed';
       job.exitCode = 1;
       job.error = error instanceof Error ? error.message : String(error);
+      logError('Job failed', { id: job.id, kind: job.kind, projectPath: job.projectPath, error });
       appendLog('stderr', job.error);
     } finally {
       job.finishedAt = Date.now();

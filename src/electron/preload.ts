@@ -11,7 +11,8 @@ const bridge = {
   rebuildGraph: (projectPath: string) => ipcRenderer.invoke('graph:rebuild', projectPath),
   deleteGraph: (projectPath: string) => ipcRenderer.invoke('graph:delete', projectPath),
   getGraphSnapshot: (projectPath: string, options: GraphSnapshotOptions) =>
-    ipcRenderer.invoke('graph:snapshot', projectPath, options),
+      ipcRenderer.invoke('graph:snapshot', projectPath, options),
+  getRuntimeLogPath: () => ipcRenderer.invoke('runtime:log-path'),
   onJobUpdated: (callback: (...args: any[]) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, job: unknown) => callback(job);
     ipcRenderer.on('job:updated', listener);

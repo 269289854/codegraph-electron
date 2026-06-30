@@ -25,6 +25,7 @@ export function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
   const [filters, setFilters] = useState(defaultFilters);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [runtimeLogPath, setRuntimeLogPath] = useState<string>('');
 
   const activeProject = projects.find((project) => project.path === activePath) ?? null;
   const selectedNode = snapshot?.nodes.find((node) => node.id === selectedNodeId) ?? null;
@@ -35,6 +36,7 @@ export function App(): JSX.Element {
       setProjects(items);
       setActivePath(items[0]?.path ?? null);
     });
+    void window.codegraphClient.getRuntimeLogPath().then(setRuntimeLogPath);
 
     const offJob = window.codegraphClient.onJobUpdated((job) => {
       setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
@@ -100,7 +102,7 @@ export function App(): JSX.Element {
     }
   }
 
-  const installLabel = install?.installed ? `CodeGraph ${install.version ?? ''}` : 'CodeGraph missing';
+  const installLabel = install?.installed ? `CodeGraph ${install.version ?? ''}` : '未检测到 CodeGraph';
   const status = activeProject?.status;
   const jobList = useMemo(() => jobs.slice(0, 8), [jobs]);
 
@@ -116,16 +118,17 @@ export function App(): JSX.Element {
         </div>
         <button className="primary" onClick={chooseProject}>
           <FolderOpen size={16} />
-          Select Folder
+          选择项目文件夹
         </button>
         <button className="secondary" onClick={() => void refreshInstall()}>
           <RefreshCw size={16} />
-          Detect Install
+          重新检测安装
         </button>
         <button className="secondary" disabled={install?.installed} onClick={() => void window.codegraphClient.installCodeGraph().then(refreshInstall)}>
           <Wrench size={16} />
-          Install CodeGraph
+          自动安装 CodeGraph
         </button>
+        {runtimeLogPath ? <p className="log-path">运行日志：{runtimeLogPath}</p> : null}
         <div className="project-list">
           {projects.map((project) => (
             <button
@@ -143,25 +146,25 @@ export function App(): JSX.Element {
       <main className="workspace">
         <header className="toolbar">
           <div>
-            <strong>{activeProject?.name ?? 'No project selected'}</strong>
-            <span>{activeProject?.path ?? 'Choose a folder to start.'}</span>
+            <strong>{activeProject?.name ?? '未选择项目'}</strong>
+            <span>{activeProject?.path ?? '选择一个项目文件夹开始。'}</span>
           </div>
           <div className="toolbar-actions">
             <button disabled={!activePath || status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.buildGraph)}>
               <GitBranch size={16} />
-              Build
+              构建图谱
             </button>
             <button disabled={!activePath || !status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.rebuildGraph)}>
               <RefreshCw size={16} />
-              Rebuild
+              重构图谱
             </button>
             <button disabled={!activePath || !status?.initialized} onClick={() => void runAndRefresh(window.codegraphClient.deleteGraph)}>
               <Trash2 size={16} />
-              Delete
+              删除图谱
             </button>
             <button disabled={!activePath} onClick={() => void refreshStatus()}>
               <Activity size={16} />
-              Status
+              刷新状态
             </button>
           </div>
         </header>
@@ -172,7 +175,7 @@ export function App(): JSX.Element {
               <div className="search-box">
                 <Search size={16} />
                 <input
-                  placeholder="Search nodes"
+                  placeholder="搜索节点"
                   value={filters.query}
                   onChange={(event) => setFilters({ ...filters, query: event.target.value })}
                   onKeyDown={(event) => {
@@ -185,7 +188,7 @@ export function App(): JSX.Element {
               </div>
               <div className="search-box compact">
                 <input
-                  placeholder="Focus file prefix"
+                  placeholder="按文件前缀聚焦"
                   value={filters.filePath}
                   onChange={(event) => setFilters({ ...filters, filePath: event.target.value })}
                   onKeyDown={(event) => {
@@ -197,16 +200,16 @@ export function App(): JSX.Element {
                 />
               </div>
               <button onClick={() => { setFilters({ ...filters, mode: 'overview' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                Overview
+                总览
               </button>
               <button onClick={() => { setFilters({ ...filters, mode: 'search' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                Search
+                搜索
               </button>
               <button onClick={() => { setFilters({ ...filters, mode: 'file' }); window.setTimeout(() => void refreshSnapshot(), 0); }}>
-                File
+                文件
               </button>
               <label>
-                Max nodes
+                最大节点数
                 <input
                   type="range"
                   min="100"
@@ -222,26 +225,26 @@ export function App(): JSX.Element {
           </div>
 
           <aside className="inspector">
-            <h2>Status</h2>
+            <h2>状态</h2>
             <StatsPanel project={activeProject} snapshot={snapshot} />
-            <h2>Selected Node</h2>
+            <h2>已选节点</h2>
             {selectedNode ? (
               <div className="node-detail">
                 <strong>{selectedNode.name}</strong>
                 <span>{selectedNode.kind}</span>
                 <p>{selectedNode.filePath}:{selectedNode.startLine}</p>
                 <p>{selectedNode.qualifiedName}</p>
-                <small>{selectedNode.degree} connections</small>
+                <small>{selectedNode.degree} 个连接</small>
               </div>
             ) : (
-              <p className="muted">No node selected.</p>
+              <p className="muted">尚未选择节点。</p>
             )}
-            <h2>Jobs</h2>
+            <h2>任务</h2>
             <div className="jobs">
               {jobList.map((job) => (
                 <div className={`job ${job.state}`} key={job.id}>
-                  <strong>{job.kind}</strong>
-                  <span>{job.state}</span>
+                  <strong>{jobKindLabel(job.kind)}</strong>
+                  <span>{jobStateLabel(job.state)}</span>
                   <pre>{job.logs.slice(-3).map((log) => log.text.trim()).filter(Boolean).join('\n')}</pre>
                 </div>
               ))}
@@ -255,14 +258,14 @@ export function App(): JSX.Element {
 
 function StatsPanel({ project, snapshot }: { project: ProjectInfo | null; snapshot: GraphSnapshot | null }): JSX.Element {
   const status = project?.status;
-  if (!status) return <p className="muted">No status loaded.</p>;
+  if (!status) return <p className="muted">尚未加载状态。</p>;
   return (
     <div className="stats">
-      <div><span>Initialized</span><strong>{status.initialized ? 'Yes' : 'No'}</strong></div>
-      <div><span>Files</span><strong>{status.fileCount.toLocaleString()}</strong></div>
-      <div><span>Nodes</span><strong>{status.nodeCount.toLocaleString()}</strong></div>
-      <div><span>Edges</span><strong>{status.edgeCount.toLocaleString()}</strong></div>
-      <div><span>Visible</span><strong>{snapshot?.nodes.length.toLocaleString() ?? '0'}</strong></div>
+      <div><span>已构建</span><strong>{status.initialized ? '是' : '否'}</strong></div>
+      <div><span>文件数</span><strong>{status.fileCount.toLocaleString()}</strong></div>
+      <div><span>节点数</span><strong>{status.nodeCount.toLocaleString()}</strong></div>
+      <div><span>边数</span><strong>{status.edgeCount.toLocaleString()}</strong></div>
+      <div><span>可见节点</span><strong>{snapshot?.nodes.length.toLocaleString() ?? '0'}</strong></div>
     </div>
   );
 }
@@ -295,7 +298,7 @@ function GraphCanvas({
   }, [layout, selectedNodeId, viewport]);
 
   if (!snapshot) {
-    return <div className="empty-graph">Select an initialized project to view its graph.</div>;
+    return <div className="empty-graph">请选择已构建图谱的项目。</div>;
   }
 
   return (
@@ -383,4 +386,22 @@ function nodeColor(kind: string): string {
   if (kind === 'class' || kind === 'interface' || kind === 'struct') return '#e4b84a';
   if (kind === 'method' || kind === 'function') return '#eb6f92';
   return '#4c96ff';
+}
+
+function jobKindLabel(kind: JobSnapshot['kind']): string {
+  return {
+    install: '安装 CodeGraph',
+    build: '构建图谱',
+    rebuild: '重构图谱',
+    delete: '删除图谱',
+  }[kind];
+}
+
+function jobStateLabel(state: JobSnapshot['state']): string {
+  return {
+    queued: '排队中',
+    running: '运行中',
+    succeeded: '已完成',
+    failed: '失败',
+  }[state];
 }

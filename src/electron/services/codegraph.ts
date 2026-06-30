@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { InstallStatus, JobLog, ProjectStatus } from '../../shared/types.js';
 import { parseStatusJson } from './status-parser.js';
+import { logError, logInfo } from './runtime-logger.js';
 
 type CommandResult = { exitCode: number | null; stdout: string; stderr: string };
 type CommandRunner = (command: string, args: string[], cwd?: string) => Promise<CommandResult>;
@@ -38,7 +39,7 @@ export async function detectCodeGraphInstall(runner?: CommandRunner): Promise<In
     version,
     commandPath,
     bundledPath: bundledExists ? bundled : bundled,
-    message: commandPath ? 'CodeGraph is available.' : 'CodeGraph is not installed.',
+    message: commandPath ? 'CodeGraph 已可用。' : '未检测到 CodeGraph。',
   };
 }
 
@@ -47,7 +48,7 @@ export async function startOfficialInstall(
   sender: WebContents,
   appendLog: (stream: JobLog['stream'], text: string) => void,
 ): Promise<ProjectStatus> {
-  appendLog('system', 'Starting official CodeGraph standalone installer.');
+  appendLog('system', '正在启动 CodeGraph 官方独立安装脚本。');
   const result = await spawnCommand(officialInstallCommand.command, officialInstallCommand.args, {
     cwd: process.env.USERPROFILE ?? process.cwd(),
     sender,
@@ -55,7 +56,7 @@ export async function startOfficialInstall(
     appendLog,
   });
   if (result.exitCode !== 0) {
-    throw new Error(`Installer failed with exit code ${result.exitCode ?? 'unknown'}.`);
+    throw new Error(`安装程序失败，退出码：${result.exitCode ?? 'unknown'}。`);
   }
   await detectCodeGraphInstall();
   return createUnavailableStatus(process.cwd());
@@ -71,7 +72,7 @@ export async function runCodeGraphCommand(
 ): Promise<ProjectStatus> {
   const install = await detectCodeGraphInstall();
   if (!install.commandPath) {
-    throw new Error('CodeGraph is not installed.');
+    throw new Error('未安装 CodeGraph。');
   }
 
   const result = await spawnCommand(install.commandPath, args, {
@@ -81,7 +82,7 @@ export async function runCodeGraphCommand(
   });
 
   if (result.exitCode !== 0) {
-    throw new Error(result.stderr.trim() || `codegraph ${args[0]} failed with exit code ${result.exitCode}.`);
+    throw new Error(result.stderr.trim() || `codegraph ${args[0]} 执行失败，退出码：${result.exitCode}。`);
   }
 
   if (args.includes('--json')) {
@@ -148,6 +149,7 @@ async function spawnCommand(
   } = {},
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
+    logInfo('Spawning command', { command, args, cwd: options.cwd });
     const child = spawn(command, args, {
       cwd: options.cwd,
       shell: false,
@@ -167,7 +169,13 @@ async function spawnCommand(
       stderr += text;
       options.appendLog?.('stderr', text);
     });
-    child.on('error', reject);
-    child.on('close', (exitCode) => resolve({ exitCode, stdout, stderr }));
+    child.on('error', (error) => {
+      logError('Command spawn failed', { command, args, error });
+      reject(error);
+    });
+    child.on('close', (exitCode) => {
+      logInfo('Command finished', { command, args, exitCode, stdoutLength: stdout.length, stderrLength: stderr.length });
+      resolve({ exitCode, stdout, stderr });
+    });
   });
 }

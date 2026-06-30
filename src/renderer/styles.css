@@ -77,9 +77,16 @@ button:disabled {
 .brand span,
 .toolbar span,
 .project span,
-.muted {
+.muted,
+.log-path {
   color: #8d98a8;
   font-size: 12px;
+}
+
+.log-path {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  margin: 4px 0;
 }
 
 .primary {
