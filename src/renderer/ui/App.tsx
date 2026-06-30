@@ -373,15 +373,19 @@ function GraphCanvas({
 }): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
+  const [nodePositions, setNodePositions] = useState<Record<string, { x: number; y: number }>>({});
   const [drag, setDrag] = useState<{
     startX: number;
     startY: number;
     lastX: number;
     lastY: number;
-    isPanning: boolean;
+    mode: 'pan' | 'node' | 'pending';
+    nodeId?: string;
+    offsetX?: number;
+    offsetY?: number;
     moved: boolean;
   } | null>(null);
-  const layout = useMemo(() => {
+  const baseLayout = useMemo(() => {
     if (!snapshot) return null;
     const nodeCount = Math.max(1, snapshot.nodes.length);
     if (focusNodeId) {
@@ -390,19 +394,27 @@ function GraphCanvas({
     const spread = Math.sqrt(nodeCount / 180);
     return createGraphLayout(snapshot, Math.round(2200 * spread), Math.round(1500 * spread));
   }, [focusNodeId, snapshot]);
+  const layout = useMemo(
+    () => (baseLayout ? applyNodePositions(baseLayout, nodePositions) : null),
+    [baseLayout, nodePositions],
+  );
+
+  useEffect(() => {
+    setNodePositions({});
+  }, [baseLayout]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !layout) return;
+    if (!canvas || !baseLayout) return;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
-    const nextScale = clampScale(Math.min(rect.width / layout.width, rect.height / layout.height) * 0.92);
+    const nextScale = clampScale(Math.min(rect.width / baseLayout.width, rect.height / baseLayout.height) * 0.92);
     setViewport({
       scale: nextScale,
-      x: (rect.width - layout.width * nextScale) / 2,
-      y: (rect.height - layout.height * nextScale) / 2,
+      x: (rect.width - baseLayout.width * nextScale) / 2,
+      y: (rect.height - baseLayout.height * nextScale) / 2,
     });
-  }, [layout]);
+  }, [baseLayout]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -460,22 +472,42 @@ function GraphCanvas({
     <canvas
       ref={canvasRef}
       className="graph-canvas"
-      onMouseDown={(event) =>
+      onMouseDown={(event) => {
+        if (!layout || !canvasRef.current) return;
+        const point = eventToGraphPoint(event, canvasRef.current, viewport);
+        const hit = findHitNode(layout.nodes, point.x, point.y);
         setDrag({
           startX: event.clientX,
           startY: event.clientY,
           lastX: event.clientX,
           lastY: event.clientY,
-          isPanning: event.ctrlKey,
+          mode: event.ctrlKey ? 'pan' : hit ? 'node' : 'pending',
+          nodeId: hit?.id,
+          offsetX: hit ? hit.x - point.x : undefined,
+          offsetY: hit ? hit.y - point.y : undefined,
           moved: false,
-        })
-      }
+        });
+      }}
       onMouseMove={(event) => {
         if (!drag) return;
         const moved =
           drag.moved ||
           Math.abs(event.clientX - drag.startX) + Math.abs(event.clientY - drag.startY) >= 4;
-        if (!drag.isPanning) {
+
+        if (drag.mode === 'node' && drag.nodeId && canvasRef.current) {
+          const point = eventToGraphPoint(event, canvasRef.current, viewport);
+          setNodePositions((current) => ({
+            ...current,
+            [drag.nodeId!]: {
+              x: point.x + (drag.offsetX ?? 0),
+              y: point.y + (drag.offsetY ?? 0),
+            },
+          }));
+          setDrag({ ...drag, lastX: event.clientX, lastY: event.clientY, moved });
+          return;
+        }
+
+        if (drag.mode !== 'pan') {
           setDrag({ ...drag, lastX: event.clientX, lastY: event.clientY, moved });
           return;
         }
@@ -496,25 +528,53 @@ function GraphCanvas({
           return;
         }
         if (drag && !drag.moved) {
-          const rect = canvasRef.current.getBoundingClientRect();
-          const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
-          const y = (event.clientY - rect.top - viewport.y) / viewport.scale;
-          const hit = findHitNode(layout.nodes, x, y);
+          const point = eventToGraphPoint(event, canvasRef.current, viewport);
+          const hit = findHitNode(layout.nodes, point.x, point.y);
           if (hit) onSelect(hit.id);
         }
         setDrag(null);
       }}
       onDoubleClick={(event) => {
         if (!layout || !canvasRef.current) return;
-        const rect = canvasRef.current.getBoundingClientRect();
-        const x = (event.clientX - rect.left - viewport.x) / viewport.scale;
-        const y = (event.clientY - rect.top - viewport.y) / viewport.scale;
-        const hit = findHitNode(layout.nodes, x, y);
+        const point = eventToGraphPoint(event, canvasRef.current, viewport);
+        const hit = findHitNode(layout.nodes, point.x, point.y);
         if (hit) onFocusNode(hit.id);
       }}
       onMouseLeave={() => setDrag(null)}
     />
   );
+}
+
+function applyNodePositions(
+  layout: ReturnType<typeof createGraphLayout>,
+  positions: Record<string, { x: number; y: number }>,
+): ReturnType<typeof createGraphLayout> {
+  if (Object.keys(positions).length === 0) return layout;
+  const nodes = layout.nodes.map((node) => {
+    const position = positions[node.id];
+    return position ? { ...node, x: position.x, y: position.y } : node;
+  });
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const edges = layout.edges
+    .map((edge) => {
+      const source = byId.get(edge.source.id);
+      const target = byId.get(edge.target.id);
+      return source && target ? { ...edge, source, target } : null;
+    })
+    .filter((edge): edge is ReturnType<typeof createGraphLayout>['edges'][number] => edge !== null);
+  return { ...layout, nodes, edges };
+}
+
+function eventToGraphPoint(
+  event: { clientX: number; clientY: number },
+  canvas: HTMLCanvasElement,
+  viewport: { scale: number; x: number; y: number },
+): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left - viewport.x) / viewport.scale,
+    y: (event.clientY - rect.top - viewport.y) / viewport.scale,
+  };
 }
 
 function findHitNode(nodes: ReturnType<typeof createGraphLayout>['nodes'], x: number, y: number) {
