@@ -1,6 +1,7 @@
 import { Activity, Box, FolderOpen, GitBranch, RefreshCw, Search, Trash2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createGraphLayout } from '../../shared/graph-layout';
+import { clampScale, zoomViewportAtPoint } from '../../shared/viewport';
 import type { GraphSnapshot, GraphSnapshotOptions, InstallStatus, JobSnapshot, ProjectInfo } from '../../shared/types';
 
 type FilterState = GraphSnapshotOptions & {
@@ -332,9 +333,16 @@ function GraphCanvas({
       ref={canvasRef}
       className="graph-canvas"
       onWheel={(event) => {
+        if (!event.ctrlKey || !canvasRef.current) return;
         event.preventDefault();
-        const nextScale = Math.max(0.35, Math.min(2.5, viewport.scale + (event.deltaY > 0 ? -0.08 : 0.08)));
-        setViewport({ ...viewport, scale: nextScale });
+        const rect = canvasRef.current.getBoundingClientRect();
+        const point = {
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+        };
+        const factor = event.deltaY > 0 ? 0.9 : 1.1;
+        const nextScale = clampScale(viewport.scale * factor);
+        setViewport(zoomViewportAtPoint(viewport, point, nextScale));
       }}
       onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY })}
       onMouseMove={(event) => {
