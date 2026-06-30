@@ -1,0 +1,294 @@
+:root {
+  color: #e8edf4;
+  background: #101216;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1120px;
+  min-height: 720px;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid #2d3542;
+  color: #e8edf4;
+  background: #181c23;
+  border-radius: 6px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #4c96ff;
+  background: #1e2631;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  color: #6c7685;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+  background: #101216;
+}
+
+.sidebar {
+  border-right: 1px solid #242a33;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #12161c;
+}
+
+.brand {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.brand div,
+.toolbar div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.brand span,
+.toolbar span,
+.project span,
+.muted {
+  color: #8d98a8;
+  font-size: 12px;
+}
+
+.primary {
+  background: #2d6cdf;
+  border-color: #2d6cdf;
+}
+
+.secondary {
+  background: #171c23;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  overflow: auto;
+}
+
+.project {
+  height: auto;
+  justify-content: flex-start;
+  align-items: flex-start;
+  padding: 10px;
+  text-align: left;
+  flex-direction: column;
+}
+
+.project.active {
+  border-color: #4c96ff;
+  background: #1d2837;
+}
+
+.workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.toolbar {
+  height: 72px;
+  border-bottom: 1px solid #242a33;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  min-height: 0;
+}
+
+.graph-area {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: 54px 1fr;
+}
+
+.graph-tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #242a33;
+}
+
+.search-box {
+  width: 360px;
+  height: 34px;
+  border: 1px solid #2d3542;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: #151a21;
+}
+
+.search-box input {
+  min-width: 0;
+  flex: 1;
+  color: #e8edf4;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.graph-tools label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #aab4c3;
+  font-size: 12px;
+}
+
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+  background: #0f1318;
+}
+
+.empty-graph {
+  display: grid;
+  place-items: center;
+  color: #8d98a8;
+  min-height: 560px;
+}
+
+.edge {
+  stroke: #2d405a;
+  stroke-width: 1;
+  opacity: 0.65;
+}
+
+.node {
+  fill: #4c96ff;
+  stroke: #e8edf4;
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.node.file {
+  fill: #2fbf71;
+}
+
+.node.class,
+.node.interface {
+  fill: #e4b84a;
+}
+
+.node.method,
+.node.function {
+  fill: #eb6f92;
+}
+
+text {
+  fill: #cbd5e1;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.inspector {
+  border-left: 1px solid #242a33;
+  padding: 16px;
+  overflow: auto;
+  background: #12161c;
+}
+
+.inspector h2 {
+  font-size: 13px;
+  margin: 12px 0 8px;
+  color: #aab4c3;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.stats div,
+.node-detail,
+.job {
+  border: 1px solid #242a33;
+  background: #151a21;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.stats span,
+.node-detail span,
+.job span {
+  display: block;
+  color: #8d98a8;
+  font-size: 12px;
+}
+
+.node-detail p {
+  color: #cbd5e1;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job pre {
+  white-space: pre-wrap;
+  color: #aab4c3;
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.job.failed {
+  border-color: #b84b4b;
+}
+
+.job.succeeded {
+  border-color: #2f8b59;
+}

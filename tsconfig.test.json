@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node", "vitest"]
+  },
+  "include": ["src/electron", "src/shared", "src/types", "tests"]
+}

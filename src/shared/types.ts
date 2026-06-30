@@ -1,0 +1,96 @@
+export type InstallStatus = {
+  installed: boolean;
+  version: string | null;
+  commandPath: string | null;
+  bundledPath: string | null;
+  message: string;
+};
+
+export type ProjectStatus = {
+  initialized: boolean;
+  projectPath: string;
+  indexPath: string;
+  version: string | null;
+  lastIndexed: string | null;
+  fileCount: number;
+  nodeCount: number;
+  edgeCount: number;
+  dbSizeBytes: number;
+  languages: string[];
+  nodesByKind: Record<string, number>;
+  pendingChanges: {
+    added: number;
+    modified: number;
+    removed: number;
+  };
+  reindexRecommended: boolean;
+  error?: string;
+};
+
+export type ProjectInfo = {
+  path: string;
+  name: string;
+  status: ProjectStatus | null;
+};
+
+export type JobKind = 'install' | 'build' | 'rebuild' | 'delete';
+
+export type JobState = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export type JobLog = {
+  jobId: string;
+  stream: 'stdout' | 'stderr' | 'system';
+  text: string;
+  createdAt: number;
+};
+
+export type JobSnapshot = {
+  id: string;
+  kind: JobKind;
+  projectPath?: string;
+  state: JobState;
+  startedAt: number;
+  finishedAt?: number;
+  exitCode?: number | null;
+  error?: string;
+  logs: JobLog[];
+};
+
+export type GraphNode = {
+  id: string;
+  kind: string;
+  name: string;
+  qualifiedName: string;
+  filePath: string;
+  language: string;
+  startLine: number;
+  endLine: number;
+  degree: number;
+};
+
+export type GraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  kind: string;
+  line: number | null;
+};
+
+export type GraphSnapshotOptions = {
+  mode: 'overview' | 'search' | 'file';
+  query?: string;
+  filePath?: string;
+  maxNodes: number;
+  nodeKinds: string[];
+  edgeKinds: string[];
+};
+
+export type GraphSnapshot = {
+  projectPath: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  totalNodes: number;
+  totalEdges: number;
+  limited: boolean;
+  generatedAt: number;
+};
