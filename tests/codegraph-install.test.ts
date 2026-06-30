@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { detectCodeGraphInstall, officialInstallCommand } from '../src/electron/services/codegraph.js';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { detectCodeGraphInstall, normalizeSpawnCommand, officialInstallCommand } from '../src/electron/services/codegraph.js';
 
 describe('CodeGraph install detection', () => {
   it('builds the official Windows installer command', () => {
@@ -34,5 +37,45 @@ describe('CodeGraph install detection', () => {
     expect(status.installed).toBe(false);
     expect(status.commandPath).toBeNull();
     expect(status.version).toBeNull();
+  });
+
+  it('wraps Windows cmd launchers with cmd.exe', () => {
+    const normalized = normalizeSpawnCommand('C:\\Program Files\\codegraph\\codegraph.cmd', [
+      'init',
+      'D:\\work\\github work\\wa-app-electron',
+    ]);
+
+    if (process.platform === 'win32') {
+      expect(normalized.command).toBe('cmd.exe');
+      expect(normalized.args.join(' ')).toContain('/c');
+      expect(normalized.args.join(' ')).toContain('call');
+      expect(normalized.args.join(' ')).toContain('"C:\\Program Files\\codegraph\\codegraph.cmd"');
+      expect(normalized.args.join(' ')).toContain('"D:\\work\\github work\\wa-app-electron"');
+    } else {
+      expect(normalized.command).toContain('codegraph.cmd');
+    }
+  });
+
+  it('resolves standalone codegraph.cmd to its node entrypoint', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-launcher-'));
+    const current = path.join(root, 'current');
+    const bin = path.join(current, 'bin');
+    const cliDir = path.join(current, 'lib', 'dist', 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.mkdirSync(cliDir, { recursive: true });
+    fs.writeFileSync(path.join(current, 'node.exe'), '');
+    fs.writeFileSync(path.join(cliDir, 'codegraph.js'), '');
+
+    const normalized = normalizeSpawnCommand(path.join(bin, 'codegraph.cmd'), ['status', 'D:\\repo with spaces']);
+
+    if (process.platform === 'win32') {
+      expect(normalized.command).toBe(path.join(current, 'node.exe'));
+      expect(normalized.args).toEqual([
+        '--liftoff-only',
+        path.join(cliDir, 'codegraph.js'),
+        'status',
+        'D:\\repo with spaces',
+      ]);
+    }
   });
 });

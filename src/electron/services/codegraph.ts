@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron';
 import { spawn } from 'node:child_process';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { InstallStatus, JobLog, ProjectStatus } from '../../shared/types.js';
@@ -149,8 +150,9 @@ async function spawnCommand(
   } = {},
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    logInfo('Spawning command', { command, args, cwd: options.cwd });
-    const child = spawn(command, args, {
+    const spawnSpec = normalizeSpawnCommand(command, args);
+    logInfo('Spawning command', { command: spawnSpec.command, args: spawnSpec.args, originalCommand: command, originalArgs: args, cwd: options.cwd });
+    const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: options.cwd,
       shell: false,
       windowsHide: true,
@@ -170,12 +172,63 @@ async function spawnCommand(
       options.appendLog?.('stderr', text);
     });
     child.on('error', (error) => {
-      logError('Command spawn failed', { command, args, error });
+      logError('Command spawn failed', { command: spawnSpec.command, args: spawnSpec.args, originalCommand: command, originalArgs: args, error });
       reject(error);
     });
     child.on('close', (exitCode) => {
-      logInfo('Command finished', { command, args, exitCode, stdoutLength: stdout.length, stderrLength: stderr.length });
+      logInfo('Command finished', { command: spawnSpec.command, args: spawnSpec.args, originalCommand: command, originalArgs: args, exitCode, stdoutLength: stdout.length, stderrLength: stderr.length });
       resolve({ exitCode, stdout, stderr });
     });
   });
+}
+
+export function normalizeSpawnCommand(command: string, args: string[]): { command: string; args: string[] } {
+  const standalone = resolveStandaloneCodeGraphCommand(command, args);
+  if (standalone) {
+    return standalone;
+  }
+
+  if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(command)) {
+    return { command, args };
+  }
+
+  const commandLine = [quoteCmdArg(command), ...args.map(quoteCmdArg)].join(' ');
+  return {
+    command: 'cmd.exe',
+    args: ['/d', '/c', `call ${commandLine}`],
+  };
+}
+
+function resolveStandaloneCodeGraphCommand(command: string, args: string[]): { command: string; args: string[] } | null {
+  if (process.platform !== 'win32' || path.basename(command).toLowerCase() !== 'codegraph.cmd') {
+    return null;
+  }
+
+  const currentDir = path.resolve(path.dirname(command), '..');
+  const nodePath = path.join(currentDir, 'node.exe');
+  const cliPath = path.join(currentDir, 'lib', 'dist', 'bin', 'codegraph.js');
+  try {
+    // The standalone Windows launcher is a tiny .cmd wrapper. Running the
+    // real node entrypoint avoids cmd.exe/%* quote loss for project paths with spaces.
+    requireFile(nodePath);
+    requireFile(cliPath);
+    return {
+      command: nodePath,
+      args: ['--liftoff-only', cliPath, ...args],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function requireFile(filePath: string): void {
+  if (!fsSync.existsSync(filePath)) {
+    throw new Error(`missing file: ${filePath}`);
+  }
+}
+
+function quoteCmdArg(value: string): string {
+  if (value.length === 0) return '""';
+  if (!/[\s"&|<>^]/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
 }
