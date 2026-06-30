@@ -34,20 +34,22 @@ export function createGraphLayout(snapshot: GraphSnapshot, width: number, height
   const centerY = height / 2;
   const maxDegree = Math.max(1, ...snapshot.nodes.map((node) => node.degree));
   const sortedNodes = [...snapshot.nodes].sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name));
-  const rings = Math.max(1, Math.ceil(Math.sqrt(sortedNodes.length) / 3));
-  const minDimension = Math.min(width, height);
-  const maxRadius = Math.max(160, minDimension * 0.43);
+  const rings = Math.max(3, Math.ceil(Math.sqrt(sortedNodes.length) / 2.2));
+  const maxRadiusX = Math.max(320, width * 0.45);
+  const maxRadiusY = Math.max(240, height * 0.45);
 
   const nodes = sortedNodes.map((node, index): LayoutNode => {
     const ringIndex = index % rings;
-    const ring = ((ringIndex + 1) / rings) * maxRadius;
+    const ring = (ringIndex + 1) / rings;
     const angle = goldenAngle(index);
     const normalizedDegree = node.degree / maxDegree;
+    const degreeRadius = 3.2 + Math.log2(Math.max(1, node.degree) + 1) * 1.15 * (kindWeight[node.kind] ?? 1);
+    const degreeOffset = 0.7 + normalizedDegree * 0.24;
     return {
       ...node,
-      x: centerX + Math.cos(angle) * ring * (0.55 + normalizedDegree * 0.35),
-      y: centerY + Math.sin(angle) * ring * (0.55 + normalizedDegree * 0.35),
-      radius: 5 + Math.sqrt(Math.max(1, node.degree)) * 1.8 * (kindWeight[node.kind] ?? 1),
+      x: centerX + Math.cos(angle) * ring * maxRadiusX * degreeOffset,
+      y: centerY + Math.sin(angle) * ring * maxRadiusY * degreeOffset,
+      radius: Math.max(4, Math.min(11, degreeRadius)),
     };
   });
 

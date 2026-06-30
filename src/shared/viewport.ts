@@ -20,5 +20,5 @@ export function zoomViewportAtPoint(
 }
 
 export function clampScale(scale: number): number {
-  return Math.max(0.35, Math.min(2.5, scale));
+  return Math.max(0.25, Math.min(6, scale));
 }

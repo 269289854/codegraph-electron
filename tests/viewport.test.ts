@@ -21,8 +21,8 @@ describe('viewport zoom', () => {
   });
 
   it('clamps zoom scale to the supported range', () => {
-    expect(clampScale(0.1)).toBe(0.35);
-    expect(clampScale(9)).toBe(2.5);
+    expect(clampScale(0.1)).toBe(0.25);
+    expect(clampScale(9)).toBe(6);
     expect(clampScale(1.2)).toBe(1.2);
   });
 });

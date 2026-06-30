@@ -27,6 +27,33 @@ describe('graph layout', () => {
     expect(layout.edges[0]?.source.id).toBe('a');
     expect(layout.edges[0]?.target.id).toBe('b');
   });
+
+  it('keeps high-degree nodes readable in a wider layout', () => {
+    const nodes = Array.from({ length: 220 }, (_, index) => node(`node-${index}`, index === 0 ? 250 : 1 + (index % 15)));
+    const snapshot: GraphSnapshot = {
+      projectPath: 'D:/repo',
+      totalNodes: nodes.length,
+      totalEdges: nodes.length - 1,
+      limited: false,
+      generatedAt: 1,
+      nodes,
+      edges: nodes.slice(1).map((item, index) => ({
+        id: String(index),
+        source: 'node-0',
+        target: item.id,
+        kind: 'calls',
+        line: null,
+      })),
+    };
+
+    const layout = createGraphLayout(snapshot, 2200, 1500);
+    const xs = layout.nodes.map((item) => item.x);
+    const ys = layout.nodes.map((item) => item.y);
+
+    expect(Math.max(...layout.nodes.map((item) => item.radius))).toBeLessThanOrEqual(11);
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(1100);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(700);
+  });
 });
 
 function node(id: string, degree: number) {

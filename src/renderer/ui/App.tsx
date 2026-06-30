@@ -13,7 +13,7 @@ const defaultFilters: FilterState = {
   mode: 'overview' as const,
   query: '',
   filePath: '',
-  maxNodes: 350,
+  maxNodes: 180,
   nodeKinds: [] as string[],
   edgeKinds: [] as string[],
 };
@@ -297,7 +297,48 @@ function GraphCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [viewport, setViewport] = useState({ scale: 1, x: 0, y: 0 });
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
-  const layout = useMemo(() => (snapshot ? createGraphLayout(snapshot, 1200, 780) : null), [snapshot]);
+  const layout = useMemo(() => {
+    if (!snapshot) return null;
+    const nodeCount = Math.max(1, snapshot.nodes.length);
+    const spread = Math.sqrt(nodeCount / 180);
+    return createGraphLayout(snapshot, Math.round(2200 * spread), Math.round(1500 * spread));
+  }, [snapshot]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !layout) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const nextScale = clampScale(Math.min(rect.width / layout.width, rect.height / layout.height) * 0.92);
+    setViewport({
+      scale: nextScale,
+      x: (rect.width - layout.width * nextScale) / 2,
+      y: (rect.height - layout.height * nextScale) / 2,
+    });
+  }, [layout]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !snapshot) return;
+
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const point = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      const factor = event.deltaY > 0 ? 0.9 : 1.1;
+      setViewport((current) => {
+        const nextScale = clampScale(current.scale * factor);
+        return zoomViewportAtPoint(current, point, nextScale);
+      });
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', handleWheel);
+  }, [snapshot]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -332,18 +373,6 @@ function GraphCanvas({
     <canvas
       ref={canvasRef}
       className="graph-canvas"
-      onWheel={(event) => {
-        if (!event.ctrlKey || !canvasRef.current) return;
-        event.preventDefault();
-        const rect = canvasRef.current.getBoundingClientRect();
-        const point = {
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-        };
-        const factor = event.deltaY > 0 ? 0.9 : 1.1;
-        const nextScale = clampScale(viewport.scale * factor);
-        setViewport(zoomViewportAtPoint(viewport, point, nextScale));
-      }}
       onMouseDown={(event) => setDrag({ x: event.clientX, y: event.clientY })}
       onMouseMove={(event) => {
         if (!drag) return;
@@ -385,9 +414,23 @@ function drawGraph(
   ctx.translate(viewport.x, viewport.y);
   ctx.scale(viewport.scale, viewport.scale);
 
-  ctx.lineWidth = 1;
+  const importantNodeIds = new Set(
+    [...layout.nodes]
+      .sort((a, b) => b.degree - a.degree || a.name.localeCompare(b.name))
+      .slice(0, selectedNodeId ? 12 : 18)
+      .map((node) => node.id),
+  );
+  const selectedNode = selectedNodeId ? layout.nodes.find((node) => node.id === selectedNodeId) : null;
+  const shouldThinEdges = viewport.scale < 0.9 && selectedNode;
+
+  ctx.lineWidth = 1 / viewport.scale;
   for (const edge of layout.edges) {
-    ctx.strokeStyle = edge.kind === 'calls' ? 'rgba(76, 150, 255, 0.33)' : 'rgba(113, 128, 150, 0.24)';
+    if (shouldThinEdges && edge.source.id !== selectedNode.id && edge.target.id !== selectedNode.id) {
+      continue;
+    }
+    const connectedToSelection = selectedNode && (edge.source.id === selectedNode.id || edge.target.id === selectedNode.id);
+    const alpha = connectedToSelection ? 0.32 : edge.kind === 'calls' ? 0.12 : 0.08;
+    ctx.strokeStyle = edge.kind === 'calls' ? `rgba(76, 150, 255, ${alpha})` : `rgba(113, 128, 150, ${alpha})`;
     ctx.beginPath();
     ctx.moveTo(edge.source.x, edge.source.y);
     ctx.lineTo(edge.target.x, edge.target.y);
@@ -398,17 +441,20 @@ function drawGraph(
   ctx.textBaseline = 'middle';
   for (const node of layout.nodes) {
     const selected = node.id === selectedNodeId;
+    const scaledRadius = node.radius / Math.sqrt(Math.max(1, viewport.scale));
+    const displayRadius = selected ? scaledRadius + 2.5 : scaledRadius;
     ctx.fillStyle = nodeColor(node.kind);
     ctx.strokeStyle = selected ? '#ffffff' : 'rgba(232, 237, 244, 0.6)';
-    ctx.lineWidth = selected ? 2.5 : 1;
+    ctx.lineWidth = (selected ? 2.2 : 1) / viewport.scale;
     ctx.beginPath();
-    ctx.arc(node.x, node.y, selected ? node.radius + 3 : node.radius, 0, Math.PI * 2);
+    ctx.arc(node.x, node.y, displayRadius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    if (selected || node.degree > 3) {
+    if (selected || (importantNodeIds.has(node.id) && viewport.scale >= 0.55)) {
+      ctx.font = `${selected ? 13 / viewport.scale : 11 / viewport.scale}px Inter, sans-serif`;
       ctx.fillStyle = '#d8e2ef';
-      ctx.fillText(node.name.slice(0, 32), node.x + node.radius + 6, node.y);
+      ctx.fillText(node.name.slice(0, 32), node.x + displayRadius + 6 / viewport.scale, node.y);
     }
   }
 
