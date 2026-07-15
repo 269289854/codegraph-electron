@@ -1,6 +1,7 @@
 import type {
   GraphSnapshot,
   GraphSnapshotOptions,
+  CodexIntegrationStatus,
   InstallStatus,
   JobSnapshot,
   ProjectInfo,
@@ -14,6 +15,8 @@ declare global {
     codegraphClient: {
       detectInstall: () => Promise<InstallStatus>;
       installCodeGraph: () => Promise<JobSnapshot>;
+      detectCodexIntegration: () => Promise<CodexIntegrationStatus>;
+      injectCodex: () => Promise<JobSnapshot>;
       selectProject: () => Promise<ProjectInfo | null>;
       getRecentProjects: () => Promise<ProjectInfo[]>;
       getProjectStatus: (projectPath: string) => Promise<ProjectStatus>;

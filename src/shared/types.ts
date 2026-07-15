@@ -6,6 +6,20 @@ export type InstallStatus = {
   message: string;
 };
 
+export type CodexConfigState = 'missing' | 'valid' | 'conflict' | 'unreadable';
+
+export type CodexValidationState = 'valid' | 'invalid' | 'unavailable';
+
+export type CodexIntegrationStatus = {
+  injected: boolean;
+  codeGraphInstalled: boolean;
+  configPath: string;
+  configState: CodexConfigState;
+  codexValidation: CodexValidationState;
+  canInject: boolean;
+  message: string;
+};
+
 export type ProjectStatus = {
   initialized: boolean;
   projectPath: string;
@@ -33,7 +47,7 @@ export type ProjectInfo = {
   status: ProjectStatus | null;
 };
 
-export type JobKind = 'install' | 'build' | 'rebuild' | 'delete';
+export type JobKind = 'install' | 'inject' | 'build' | 'rebuild' | 'delete';
 
 export type JobState = 'queued' | 'running' | 'succeeded' | 'failed';
 

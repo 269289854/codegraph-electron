@@ -1,8 +1,15 @@
-import { Activity, ArrowLeft, Box, FolderOpen, GitBranch, RefreshCw, Search, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowLeft, Box, FolderOpen, GitBranch, RefreshCw, Search, ShieldCheck, Trash2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createGraphLayout } from '../../shared/graph-layout';
 import { clampScale, zoomViewportAtPoint } from '../../shared/viewport';
-import type { GraphSnapshot, GraphSnapshotOptions, InstallStatus, JobSnapshot, ProjectInfo } from '../../shared/types';
+import type {
+  CodexIntegrationStatus,
+  GraphSnapshot,
+  GraphSnapshotOptions,
+  InstallStatus,
+  JobSnapshot,
+  ProjectInfo,
+} from '../../shared/types';
 
 type FilterState = GraphSnapshotOptions & {
   query: string;
@@ -30,6 +37,8 @@ type ViewHistoryItem = {
 
 export function App(): JSX.Element {
   const [install, setInstall] = useState<InstallStatus | null>(null);
+  const [codex, setCodex] = useState<CodexIntegrationStatus | null>(null);
+  const [codexBusy, setCodexBusy] = useState(false);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobSnapshot[]>([]);
@@ -45,6 +54,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     void refreshInstall();
+    void refreshCodex();
     void window.codegraphClient.getRecentProjects().then((items) => {
       setProjects(items);
       setActivePath(items[0]?.path ?? null);
@@ -71,6 +81,27 @@ export function App(): JSX.Element {
 
   async function refreshInstall(): Promise<void> {
     setInstall(await window.codegraphClient.detectInstall());
+  }
+
+  async function refreshCodex(): Promise<void> {
+    setCodex(await window.codegraphClient.detectCodexIntegration());
+  }
+
+  async function installCodeGraph(): Promise<void> {
+    await window.codegraphClient.installCodeGraph();
+    await Promise.all([refreshInstall(), refreshCodex()]);
+  }
+
+  async function injectCodex(): Promise<void> {
+    if (!codex?.canInject || codexBusy) return;
+    setCodexBusy(true);
+    try {
+      const job = await window.codegraphClient.injectCodex();
+      setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
+      await refreshCodex();
+    } finally {
+      setCodexBusy(false);
+    }
   }
 
   async function chooseProject(): Promise<void> {
@@ -179,10 +210,31 @@ export function App(): JSX.Element {
           <RefreshCw size={16} />
           重新检测安装
         </button>
-        <button className="secondary" disabled={install?.installed} onClick={() => void window.codegraphClient.installCodeGraph().then(refreshInstall)}>
+        <button className="secondary" disabled={install?.installed} onClick={() => void installCodeGraph()}>
           <Wrench size={16} />
           自动安装 CodeGraph
         </button>
+        <section className="codex-panel" aria-label="Codex MCP">
+          <div className="codex-panel-heading">
+            <div>
+              <strong>Codex MCP</strong>
+              <span>{codexStatusLabel(codex)}</span>
+            </div>
+            <ShieldCheck size={18} />
+          </div>
+          <p>{codex?.message ?? '正在检测 Codex 配置。'}</p>
+          {codex?.configPath ? <small title={codex.configPath}>{codex.configPath}</small> : null}
+          <div className="codex-panel-actions">
+            <button className="secondary" onClick={() => void refreshCodex()} disabled={codexBusy}>
+              <RefreshCw size={14} />
+              检测
+            </button>
+            <button className="primary" onClick={() => void injectCodex()} disabled={!codex?.canInject || codexBusy}>
+              <ShieldCheck size={14} />
+              注入 Codex
+            </button>
+          </div>
+        </section>
         {runtimeLogPath ? <p className="log-path">运行日志：{runtimeLogPath}</p> : null}
         <div className="project-list">
           {projects.map((project) => (
@@ -670,10 +722,20 @@ function nodeColor(kind: string): string {
 function jobKindLabel(kind: JobSnapshot['kind']): string {
   return {
     install: '安装 CodeGraph',
+    inject: '注入 Codex',
     build: '构建图谱',
     rebuild: '重构图谱',
     delete: '删除图谱',
   }[kind];
+}
+
+function codexStatusLabel(status: CodexIntegrationStatus | null): string {
+  if (!status) return '检测中';
+  if (status.codexValidation === 'invalid') return '配置异常';
+  if (status.configState === 'unreadable') return '无法读取配置';
+  if (status.configState === 'conflict') return '配置冲突';
+  if (!status.codeGraphInstalled) return '未安装 CodeGraph';
+  return status.injected ? '已注入' : '未注入';
 }
 
 function jobStateLabel(state: JobSnapshot['state']): string {

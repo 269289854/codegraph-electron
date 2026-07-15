@@ -2,13 +2,24 @@ import type { WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import type { InstallStatus, JobLog, ProjectStatus } from '../../shared/types.js';
+import type {
+  CodexConfigState,
+  CodexIntegrationStatus,
+  CodexValidationState,
+  InstallStatus,
+  JobLog,
+  ProjectStatus,
+} from '../../shared/types.js';
 import { parseStatusJson } from './status-parser.js';
 import { logError, logInfo } from './runtime-logger.js';
 
-type CommandResult = { exitCode: number | null; stdout: string; stderr: string };
-type CommandRunner = (command: string, args: string[], cwd?: string) => Promise<CommandResult>;
+export type CommandResult = { exitCode: number | null; stdout: string; stderr: string };
+export type CommandRunner = (command: string, args: string[], cwd?: string) => Promise<CommandResult>;
+
+const codexMcpHeader = '[mcp_servers.codegraph]';
+const codexInjectionArgs = ['install', '--target=codex', '--location=global', '--yes'];
 
 export const officialInstallCommand = {
   command: 'powershell.exe',
@@ -25,6 +36,94 @@ export function bundledCodeGraphPath(): string | null {
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) return null;
   return path.join(localAppData, 'codegraph', 'current', 'bin', process.platform === 'win32' ? 'codegraph.cmd' : 'codegraph');
+}
+
+export function codexConfigPath(homeDirectory = os.homedir()): string {
+  return path.join(homeDirectory, '.codex', 'config.toml');
+}
+
+export async function detectCodexIntegration(
+  runner?: CommandRunner,
+  configPath = codexConfigPath(),
+): Promise<CodexIntegrationStatus> {
+  const run = runner ?? ((command, args, cwd) => spawnCommand(command, args, { cwd }));
+  const install = await detectCodeGraphInstall(run);
+  const configState = await readCodexConfigState(configPath);
+  const codexValidation = await validateCodexConfig(run);
+  const injected = configState === 'valid';
+  const canInject = install.installed && configState === 'missing' && codexValidation !== 'invalid';
+
+  return {
+    injected,
+    codeGraphInstalled: install.installed,
+    configPath,
+    configState,
+    codexValidation,
+    canInject,
+    message: codexIntegrationMessage({
+      configState,
+      codexValidation,
+      codeGraphInstalled: install.installed,
+      injected,
+    }),
+  };
+}
+
+export function parseCodexConfigState(content: string): CodexConfigState {
+  const lines = content.split(/\r?\n/);
+  const headerIndex = lines.findIndex((line) => line.trim() === codexMcpHeader);
+  if (headerIndex < 0) return 'missing';
+
+  const sectionLines: string[] = [];
+  for (const line of lines.slice(headerIndex + 1)) {
+    if (/^\s*\[[^\]]+\]\s*$/.test(line)) break;
+    sectionLines.push(line);
+  }
+
+  const command = sectionLines.find((line) => /^\s*command\s*=/.test(line));
+  const args = sectionLines.find((line) => /^\s*args\s*=/.test(line));
+  const commandMatches = /^\s*command\s*=\s*"([^"]*)"\s*(?:#.*)?$/.exec(command ?? '');
+  const argsMatches = /^\s*args\s*=\s*\[\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\]\s*(?:#.*)?$/.exec(args ?? '');
+
+  return commandMatches?.[1] === 'codegraph' && argsMatches?.[1] === 'serve' && argsMatches?.[2] === '--mcp'
+    ? 'valid'
+    : 'conflict';
+}
+
+async function readCodexConfigState(configPath: string): Promise<CodexConfigState> {
+  try {
+    return parseCodexConfigState(await fs.readFile(configPath, 'utf8'));
+  } catch (error) {
+    if (isFileMissingError(error)) return 'missing';
+    return 'unreadable';
+  }
+}
+
+async function validateCodexConfig(run: CommandRunner): Promise<CodexValidationState> {
+  const commandPath = await findCommandOnPath('codex', run);
+  if (!commandPath) return 'unavailable';
+  const result = await run(commandPath, ['mcp', 'list']).catch(() => null);
+  return result?.exitCode === 0 ? 'valid' : 'invalid';
+}
+
+function codexIntegrationMessage({
+  configState,
+  codexValidation,
+  codeGraphInstalled,
+  injected,
+}: Pick<CodexIntegrationStatus, 'configState' | 'codexValidation' | 'codeGraphInstalled' | 'injected'>): string {
+  if (codexValidation === 'invalid') return 'Codex 配置无法解析，请先修复 Codex 配置。';
+  if (configState === 'unreadable') return '无法读取 Codex 配置文件。';
+  if (configState === 'conflict') return '检测到已有 CodeGraph 配置，但内容与官方配置不一致。';
+  if (!codeGraphInstalled) return '未安装 CodeGraph，暂时不能注入 Codex。';
+  if (injected && codexValidation === 'unavailable') return 'CodeGraph 已注入 Codex，未找到 codex 命令，跳过完整校验。';
+  if (injected) return 'CodeGraph 已注入 Codex。';
+  if (codexValidation === 'unavailable') return '尚未注入 Codex，未找到 codex 命令，已完成文件级检测。';
+  return 'CodeGraph 已安装，可以注入 Codex。';
+}
+
+function isFileMissingError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
 
 export async function detectCodeGraphInstall(runner?: CommandRunner): Promise<InstallStatus> {
@@ -71,12 +170,7 @@ export async function runCodeGraphCommand(
     appendLog?: (stream: JobLog['stream'], text: string) => void;
   } = {},
 ): Promise<ProjectStatus> {
-  const install = await detectCodeGraphInstall();
-  if (!install.commandPath) {
-    throw new Error('未安装 CodeGraph。');
-  }
-
-  const result = await spawnCommand(install.commandPath, args, {
+  const result = await runCodeGraphCliCommand(args, {
     cwd: projectPath,
     sender: options.sender,
     appendLog: options.appendLog,
@@ -91,6 +185,59 @@ export async function runCodeGraphCommand(
   }
 
   return runCodeGraphCommand(projectPath, ['status', projectPath, '--json']);
+}
+
+export async function runCodeGraphCliCommand(
+  args: string[],
+  options: {
+    cwd?: string;
+    sender?: WebContents;
+    jobId?: string;
+    appendLog?: (stream: JobLog['stream'], text: string) => void;
+  } = {},
+  runner?: CommandRunner,
+): Promise<CommandResult> {
+  const run = runner ?? ((command, commandArgs, cwd) => spawnCommand(command, commandArgs, {
+    cwd,
+    sender: options.sender,
+    jobId: options.jobId,
+    appendLog: options.appendLog,
+  }));
+  const install = await detectCodeGraphInstall(run);
+  if (!install.commandPath) {
+    throw new Error('未安装 CodeGraph。');
+  }
+  return run(install.commandPath, args, options.cwd ?? process.cwd());
+}
+
+export async function startCodexInjection(
+  jobId: string,
+  sender: WebContents,
+  appendLog: (stream: JobLog['stream'], text: string) => void,
+  runner?: CommandRunner,
+  configPath = codexConfigPath(),
+): Promise<CodexIntegrationStatus> {
+  const before = await detectCodexIntegration(runner, configPath);
+  if (!before.canInject) {
+    throw new Error(before.message);
+  }
+
+  appendLog('system', '正在调用 CodeGraph 官方安装器注入 Codex MCP。');
+  const result = await runCodeGraphCliCommand(codexInjectionArgs, {
+    cwd: process.env.USERPROFILE ?? process.cwd(),
+    sender,
+    jobId,
+    appendLog,
+  }, runner);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || `Codex 注入失败，退出码：${result.exitCode ?? 'unknown'}。`);
+  }
+
+  const after = await detectCodexIntegration(runner, configPath);
+  if (!after.injected) {
+    throw new Error(`注入命令已完成，但未检测到有效的 Codex MCP 配置：${after.message}`);
+  }
+  return after;
 }
 
 export async function readCodeGraphStatus(projectPath: string): Promise<ProjectStatus> {
@@ -123,8 +270,12 @@ export function createUnavailableStatus(projectPath: string): ProjectStatus {
 }
 
 async function findCodeGraphOnPath(run: CommandRunner): Promise<string | null> {
+  return findCommandOnPath('codegraph', run);
+}
+
+async function findCommandOnPath(commandName: string, run: CommandRunner): Promise<string | null> {
   const command = process.platform === 'win32' ? 'where.exe' : 'which';
-  const result = await run(command, ['codegraph']).catch(() => null);
+  const result = await run(command, [commandName]).catch(() => null);
   if (!result || result.exitCode !== 0) return null;
   return result.stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
 }

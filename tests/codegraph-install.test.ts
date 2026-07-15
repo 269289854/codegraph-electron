@@ -2,7 +2,62 @@ import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { detectCodeGraphInstall, normalizeSpawnCommand, officialInstallCommand } from '../src/electron/services/codegraph.js';
+import {
+  detectCodexIntegration,
+  detectCodeGraphInstall,
+  normalizeSpawnCommand,
+  officialInstallCommand,
+  parseCodexConfigState,
+  startCodexInjection,
+  type CommandRunner,
+} from '../src/electron/services/codegraph.js';
+
+const pathLookupCommand = process.platform === 'win32' ? 'where.exe' : 'which';
+const codeGraphCommandPath = 'C:\\tools\\codegraph.cmd';
+
+function createRunner(options: {
+  codeGraphInstalled?: boolean;
+  codexInstalled?: boolean;
+  codexExitCode?: number;
+  onInject?: () => void;
+} = {}): { calls: Array<{ command: string; args: string[] }>; runner: CommandRunner } {
+  const calls: Array<{ command: string; args: string[] }> = [];
+  const runner: CommandRunner = async (command, args) => {
+    calls.push({ command, args });
+    if (command === pathLookupCommand && args[0] === 'codegraph') {
+      return options.codeGraphInstalled === false
+        ? { exitCode: 1, stdout: '', stderr: 'not found' }
+        : { exitCode: 0, stdout: `${codeGraphCommandPath}\r\n`, stderr: '' };
+    }
+    if (command === pathLookupCommand && args[0] === 'codex') {
+      return options.codexInstalled
+        ? { exitCode: 0, stdout: 'C:\\tools\\codex.cmd\r\n', stderr: '' }
+        : { exitCode: 1, stdout: '', stderr: 'not found' };
+    }
+    if (command === codeGraphCommandPath && args[0] === 'version') {
+      return { exitCode: 0, stdout: '1.1.5\n', stderr: '' };
+    }
+    if (command === 'C:\\tools\\codex.cmd' && args[0] === 'mcp' && args[1] === 'list') {
+      return { exitCode: options.codexExitCode ?? 0, stdout: '', stderr: options.codexExitCode ? 'invalid config' : '' };
+    }
+    if (command === codeGraphCommandPath && args[0] === 'install') {
+      options.onInject?.();
+      return { exitCode: 0, stdout: 'installed\n', stderr: '' };
+    }
+    return { exitCode: 1, stdout: '', stderr: 'not found' };
+  };
+  return { calls, runner };
+}
+
+async function withMissingBundledInstall<T>(callback: () => Promise<T>): Promise<T> {
+  const originalLocalAppData = process.env.LOCALAPPDATA;
+  process.env.LOCALAPPDATA = path.join(os.tmpdir(), 'codegraph-electron-missing-bundle');
+  try {
+    return await callback();
+  } finally {
+    process.env.LOCALAPPDATA = originalLocalAppData;
+  }
+}
 
 describe('CodeGraph install detection', () => {
   it('builds the official Windows installer command', () => {
@@ -77,5 +132,80 @@ describe('CodeGraph install detection', () => {
         'D:\\repo with spaces',
       ]);
     }
+  });
+
+  it('classifies Codex MCP configuration states', () => {
+    expect(parseCodexConfigState('model = "gpt-5"\n')).toBe('missing');
+    expect(parseCodexConfigState([
+      '[mcp_servers.codegraph]',
+      'command = "codegraph"',
+      'args = ["serve", "--mcp"]',
+    ].join('\n'))).toBe('valid');
+    expect(parseCodexConfigState([
+      '[mcp_servers.codegraph]',
+      'command = "other-server"',
+      'args = ["serve", "--mcp"]',
+    ].join('\n'))).toBe('conflict');
+  });
+
+  it('enables Codex injection only when CodeGraph is installed and config is missing', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-')), 'config.toml');
+    const { runner } = createRunner();
+
+    const status = await withMissingBundledInstall(() => detectCodexIntegration(runner, configPath));
+
+    expect(status.configState).toBe('missing');
+    expect(status.injected).toBe(false);
+    expect(status.canInject).toBe(true);
+  });
+
+  it('keeps injection disabled for unreadable or invalid Codex configuration', async () => {
+    const unreadablePath = fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-dir-'));
+    const unreadableRunner = createRunner();
+    const unreadable = await withMissingBundledInstall(() => detectCodexIntegration(unreadableRunner.runner, unreadablePath));
+
+    expect(unreadable.configState).toBe('unreadable');
+    expect(unreadable.canInject).toBe(false);
+
+    const invalidConfigPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-invalid-')), 'config.toml');
+    const invalidRunner = createRunner({ codexInstalled: true, codexExitCode: 1 });
+    const invalid = await withMissingBundledInstall(() => detectCodexIntegration(invalidRunner.runner, invalidConfigPath));
+
+    expect(invalid.codexValidation).toBe('invalid');
+    expect(invalid.canInject).toBe(false);
+  });
+
+  it('falls back to file-level detection when codex is unavailable', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-no-cli-')), 'config.toml');
+    fs.writeFileSync(configPath, '[mcp_servers.codegraph]\ncommand = "codegraph"\nargs = ["serve", "--mcp"]\n');
+    const { runner } = createRunner();
+
+    const status = await withMissingBundledInstall(() => detectCodexIntegration(runner, configPath));
+
+    expect(status.injected).toBe(true);
+    expect(status.codexValidation).toBe('unavailable');
+    expect(status.canInject).toBe(false);
+  });
+
+  it('rejects Codex injection when CodeGraph is not installed', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-no-codegraph-')), 'config.toml');
+    const { runner } = createRunner({ codeGraphInstalled: false });
+
+    await expect(withMissingBundledInstall(() => startCodexInjection('inject-test', undefined as never, () => undefined, runner, configPath)))
+      .rejects.toThrow('未安装 CodeGraph');
+  });
+
+  it('injects through the official CLI arguments and verifies the result', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-codex-inject-')), 'config.toml');
+    const { calls, runner } = createRunner({
+      onInject: () => fs.writeFileSync(configPath, '[mcp_servers.codegraph]\ncommand = "codegraph"\nargs = ["serve", "--mcp"]\n'),
+    });
+
+    const status = await withMissingBundledInstall(() => startCodexInjection('inject-test', undefined as never, () => undefined, runner, configPath));
+    const injectionCall = calls.find((call) => call.command === codeGraphCommandPath && call.args[0] === 'install');
+
+    expect(injectionCall?.args).toEqual(['install', '--target=codex', '--location=global', '--yes']);
+    expect(status.injected).toBe(true);
+    expect(status.configState).toBe('valid');
   });
 });

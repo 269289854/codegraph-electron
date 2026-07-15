@@ -98,6 +98,59 @@ button:disabled {
   background: #171c23;
 }
 
+.codex-panel {
+  border: 1px solid #2d3542;
+  border-radius: 6px;
+  padding: 12px;
+  background: #151a21;
+}
+
+.codex-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.codex-panel-heading div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.codex-panel-heading span,
+.codex-panel small {
+  color: #8d98a8;
+  font-size: 12px;
+}
+
+.codex-panel p {
+  color: #b7c0cc;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 10px 0 6px;
+}
+
+.codex-panel small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-panel-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.codex-panel-actions button {
+  min-width: 0;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
 .project-list {
   display: flex;
   flex-direction: column;

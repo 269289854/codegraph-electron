@@ -4,6 +4,8 @@ import type { GraphSnapshotOptions } from '../shared/types.js';
 const bridge = {
   detectInstall: () => ipcRenderer.invoke('codegraph:detect-install'),
   installCodeGraph: () => ipcRenderer.invoke('codegraph:install'),
+  detectCodexIntegration: () => ipcRenderer.invoke('codex:detect'),
+  injectCodex: () => ipcRenderer.invoke('codex:inject'),
   selectProject: () => ipcRenderer.invoke('project:select'),
   getRecentProjects: () => ipcRenderer.invoke('project:recent'),
   getProjectStatus: (projectPath: string) => ipcRenderer.invoke('project:status', projectPath),

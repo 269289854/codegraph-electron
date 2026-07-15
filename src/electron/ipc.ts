@@ -1,15 +1,19 @@
 import { dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import {
+  detectCodexIntegration,
   detectCodeGraphInstall,
   readCodeGraphStatus,
   runCodeGraphCommand,
+  startCodexInjection,
   startOfficialInstall,
 } from './services/codegraph.js';
 import { readRecentProjects, upsertRecentProject } from './services/projects.js';
 import { jobRunner } from './services/jobs.js';
 import { readGraphSnapshot } from './services/graph-snapshot.js';
 import { getRuntimeLogPath, logError, logInfo } from './services/runtime-logger.js';
+
+let codexInjectionInFlight = false;
 
 ipcMain.handle('codegraph:detect-install', async () =>
   withIpcLogging('codegraph:detect-install', undefined, () => detectCodeGraphInstall()),
@@ -23,6 +27,27 @@ ipcMain.handle('codegraph:install', async (event) =>
     }),
   ),
 );
+
+ipcMain.handle('codex:detect', async () =>
+  withIpcLogging('codex:detect', undefined, () => detectCodexIntegration()),
+);
+
+ipcMain.handle('codex:inject', async (event) => {
+  if (codexInjectionInFlight) {
+    throw new Error('Codex 注入任务正在运行。');
+  }
+  codexInjectionInFlight = true;
+  try {
+    return await withIpcLogging('codex:inject', undefined, () =>
+      jobRunner.run({
+        kind: 'inject',
+        run: ({ job, appendLog }) => startCodexInjection(job.id, event.sender, appendLog),
+      }),
+    );
+  } finally {
+    codexInjectionInFlight = false;
+  }
+});
 
 ipcMain.handle('project:select', async () => {
   logInfo('IPC project:select');

@@ -8,6 +8,7 @@ Desktop management client for [CodeGraph](https://github.com/colbymchenry/codegr
 - Install CodeGraph through the official PowerShell installer when it is missing.
 - Select local project folders and persist recent projects.
 - Build, rebuild, delete, and refresh CodeGraph indexes through the CLI.
+- Detect and inject the CodeGraph MCP server into the global Codex configuration.
 - Read `.codegraph/codegraph.db` in read-only mode and render a filtered graph view.
 - Explore overview, search, file-focused, and node-focused graph snapshots with pan/zoom and node details.
 - Uses a Japanese anime-inspired app icon for the window, taskbar, shortcuts, and installer.
@@ -41,5 +42,11 @@ The app intentionally shells out to the installed CLI instead of mutating `.code
 - Rebuild graph: `codegraph index <projectPath>`
 - Delete graph: `codegraph uninit <projectPath> --force`
 - Status: `codegraph status <projectPath> --json`
+
+Codex MCP detection runs automatically when the app starts. Injection stays disabled until CodeGraph is installed, the Codex configuration is readable, and no valid CodeGraph MCP entry exists. The injection action delegates to the official command:
+
+```powershell
+codegraph install --target=codex --location=global --yes
+```
 
 Graph visualization reads `<projectPath>/.codegraph/codegraph.db` with `sql.js` from the Electron main process. Renderer code only talks through the preload IPC bridge.
