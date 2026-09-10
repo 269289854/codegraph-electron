@@ -4,8 +4,10 @@ import type {
   CodexIntegrationStatus,
   InstallStatus,
   JobSnapshot,
+  OpencodeIntegrationStatus,
   ProjectInfo,
   ProjectStatus,
+  UpdateStatus,
 } from '../shared/types';
 
 export {};
@@ -15,10 +17,15 @@ declare global {
     codegraphClient: {
       detectInstall: () => Promise<InstallStatus>;
       installCodeGraph: () => Promise<JobSnapshot>;
+      checkForUpdate: () => Promise<UpdateStatus>;
+      updateCodeGraph: () => Promise<JobSnapshot>;
       detectCodexIntegration: () => Promise<CodexIntegrationStatus>;
       injectCodex: () => Promise<JobSnapshot>;
+      detectOpencodeIntegration: () => Promise<OpencodeIntegrationStatus>;
+      injectOpencode: () => Promise<JobSnapshot>;
       selectProject: () => Promise<ProjectInfo | null>;
       getRecentProjects: () => Promise<ProjectInfo[]>;
+      removeProject: (projectPath: string) => Promise<ProjectInfo[]>;
       getProjectStatus: (projectPath: string) => Promise<ProjectStatus>;
       buildGraph: (projectPath: string) => Promise<JobSnapshot>;
       rebuildGraph: (projectPath: string) => Promise<JobSnapshot>;

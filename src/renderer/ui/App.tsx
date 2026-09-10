@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, Box, FolderOpen, GitBranch, RefreshCw, Search, ShieldCheck, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowLeft, Box, Download, ExternalLink, FolderOpen, GitBranch, RefreshCw, Search, ShieldCheck, Trash2, Wrench } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createGraphLayout } from '../../shared/graph-layout';
 import { clampScale, zoomViewportAtPoint } from '../../shared/viewport';
@@ -8,7 +8,9 @@ import type {
   GraphSnapshotOptions,
   InstallStatus,
   JobSnapshot,
+  OpencodeIntegrationStatus,
   ProjectInfo,
+  UpdateStatus,
 } from '../../shared/types';
 
 type FilterState = GraphSnapshotOptions & {
@@ -17,6 +19,7 @@ type FilterState = GraphSnapshotOptions & {
 };
 
 const focusedMaxNodes = 48;
+const projectPageSize = 8;
 
 const defaultFilters: FilterState = {
   mode: 'overview' as const,
@@ -39,7 +42,12 @@ export function App(): JSX.Element {
   const [install, setInstall] = useState<InstallStatus | null>(null);
   const [codex, setCodex] = useState<CodexIntegrationStatus | null>(null);
   const [codexBusy, setCodexBusy] = useState(false);
+  const [opencode, setOpencode] = useState<OpencodeIntegrationStatus | null>(null);
+  const [opencodeBusy, setOpencodeBusy] = useState(false);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
+  const [projectPage, setProjectPage] = useState(0);
   const [activePath, setActivePath] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobSnapshot[]>([]);
   const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
@@ -55,6 +63,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     void refreshInstall();
     void refreshCodex();
+    void refreshOpencode();
+    void checkUpdate();
     void window.codegraphClient.getRecentProjects().then((items) => {
       setProjects(items);
       setActivePath(items[0]?.path ?? null);
@@ -87,6 +97,14 @@ export function App(): JSX.Element {
     setCodex(await window.codegraphClient.detectCodexIntegration());
   }
 
+  async function refreshOpencode(): Promise<void> {
+    setOpencode(await window.codegraphClient.detectOpencodeIntegration());
+  }
+
+  async function checkUpdate(): Promise<void> {
+    setUpdate(await window.codegraphClient.checkForUpdate());
+  }
+
   async function installCodeGraph(): Promise<void> {
     await window.codegraphClient.installCodeGraph();
     await Promise.all([refreshInstall(), refreshCodex()]);
@@ -104,12 +122,50 @@ export function App(): JSX.Element {
     }
   }
 
+  async function injectOpencode(): Promise<void> {
+    if (!opencode?.canInject || opencodeBusy) return;
+    setOpencodeBusy(true);
+    try {
+      const job = await window.codegraphClient.injectOpencode();
+      setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
+      await refreshOpencode();
+    } finally {
+      setOpencodeBusy(false);
+    }
+  }
+
+  async function updateCodeGraph(): Promise<void> {
+    if (updateBusy) return;
+    setUpdateBusy(true);
+    try {
+      const job = await window.codegraphClient.updateCodeGraph();
+      setJobs((existing) => [job, ...existing.filter((item) => item.id !== job.id)].slice(0, 20));
+      await refreshInstall();
+      await checkUpdate();
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
+
   async function chooseProject(): Promise<void> {
     const project = await window.codegraphClient.selectProject();
     if (!project) return;
     setProjects((existing) => [project, ...existing.filter((item) => item.path !== project.path)]);
     setActivePath(project.path);
+    setProjectPage(0);
     setViewHistory([]);
+  }
+
+  async function removeProject(projectPath: string): Promise<void> {
+    const name = projects.find((project) => project.path === projectPath)?.name ?? projectPath;
+    if (!window.confirm(`确定从列表中移除项目「${name}」吗？项目图谱数据不会被删除。`)) return;
+    const remaining = await window.codegraphClient.removeProject(projectPath);
+    setProjects(remaining);
+    if (activePath === projectPath) {
+      setActivePath(remaining[0]?.path ?? null);
+      setSnapshot(null);
+      setViewHistory([]);
+    }
   }
 
   async function refreshStatus(projectPath = activePath): Promise<void> {
@@ -155,6 +211,12 @@ export function App(): JSX.Element {
   const canBuild = Boolean(activePath && !status?.initialized);
   const canUseGraph = Boolean(activePath && status?.initialized);
   const jobList = useMemo(() => jobs.slice(0, 8), [jobs]);
+  const projectPageCount = Math.max(1, Math.ceil(projects.length / projectPageSize));
+  const safeProjectPage = Math.min(projectPage, projectPageCount - 1);
+  const visibleProjects = projects.slice(
+    safeProjectPage * projectPageSize,
+    (safeProjectPage + 1) * projectPageSize,
+  );
   const viewLabel = getViewLabel(filters, focusNode, snapshot);
 
   function setGlobalMode(mode: 'overview' | 'search' | 'file'): void {
@@ -214,6 +276,36 @@ export function App(): JSX.Element {
           <Wrench size={16} />
           自动安装 CodeGraph
         </button>
+        <section className={`codex-panel update-panel${update?.updateAvailable ? ' update-available' : ''}`} aria-label="CodeGraph 更新">
+          <div className="codex-panel-heading">
+            <div>
+              <strong>CodeGraph 更新</strong>
+              <span>{updateStatusLabel(update, install)}</span>
+            </div>
+            <Download size={18} />
+          </div>
+          <p>{update?.message ?? '正在检查远端版本。'}</p>
+          {update?.releaseUrl && update.updateAvailable ? (
+            <small title={update.releaseUrl}>{update.releaseUrl}</small>
+          ) : null}
+          <div className="codex-panel-actions">
+            <button className="secondary" onClick={() => void checkUpdate()} disabled={updateBusy}>
+              <RefreshCw size={14} />
+              检查更新
+            </button>
+            {update?.updateAvailable ? (
+              <button className="primary" onClick={() => void updateCodeGraph()} disabled={updateBusy}>
+                <Download size={14} />
+                立即更新
+              </button>
+            ) : update?.releaseUrl && update.updateAvailable === false ? (
+              <a className="secondary release-link" href={update.releaseUrl} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+                发布页
+              </a>
+            ) : null}
+          </div>
+        </section>
         <section className="codex-panel" aria-label="Codex MCP">
           <div className="codex-panel-heading">
             <div>
@@ -235,10 +327,31 @@ export function App(): JSX.Element {
             </button>
           </div>
         </section>
+        <section className="codex-panel" aria-label="OpenCode MCP">
+          <div className="codex-panel-heading">
+            <div>
+              <strong>OpenCode MCP</strong>
+              <span>{opencodeStatusLabel(opencode)}</span>
+            </div>
+            <ShieldCheck size={18} />
+          </div>
+          <p>{opencode?.message ?? '正在检测 OpenCode 配置。'}</p>
+          {opencode?.configPath ? <small title={opencode.configPath}>{opencode.configPath}</small> : null}
+          <div className="codex-panel-actions">
+            <button className="secondary" onClick={() => void refreshOpencode()} disabled={opencodeBusy}>
+              <RefreshCw size={14} />
+              检测
+            </button>
+            <button className="primary" onClick={() => void injectOpencode()} disabled={!opencode?.canInject || opencodeBusy}>
+              <ShieldCheck size={14} />
+              注入 OpenCode
+            </button>
+          </div>
+        </section>
         {runtimeLogPath ? <p className="log-path">运行日志：{runtimeLogPath}</p> : null}
         <div className="project-list">
-          {projects.map((project) => (
-            <button
+          {visibleProjects.map((project) => (
+            <div
               className={project.path === activePath ? 'project active' : 'project'}
               key={project.path}
               onClick={() => {
@@ -246,11 +359,47 @@ export function App(): JSX.Element {
                 setViewHistory([]);
               }}
             >
-              <strong>{project.name}</strong>
-              <span>{project.path}</span>
-            </button>
+              <span className="project-row">
+                <span className="project-text">
+                  <strong>{project.name}</strong>
+                  <span>{project.path}</span>
+                </span>
+                <button
+                  className="project-remove"
+                  title="从列表移除项目"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void removeProject(project.path);
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </span>
+            </div>
           ))}
+          {projects.length === 0 ? <p className="muted">尚未添加项目。</p> : null}
         </div>
+        {projectPageCount > 1 ? (
+          <div className="project-pagination">
+            <button
+              className="secondary page-button"
+              disabled={safeProjectPage === 0}
+              onClick={() => setProjectPage(safeProjectPage - 1)}
+            >
+              上一页
+            </button>
+            <span>
+              第 {safeProjectPage + 1}/{projectPageCount} 页
+            </span>
+            <button
+              className="secondary page-button"
+              disabled={safeProjectPage >= projectPageCount - 1}
+              onClick={() => setProjectPage(safeProjectPage + 1)}
+            >
+              下一页
+            </button>
+          </div>
+        ) : null}
       </aside>
 
       <main className="workspace">
@@ -723,6 +872,8 @@ function jobKindLabel(kind: JobSnapshot['kind']): string {
   return {
     install: '安装 CodeGraph',
     inject: '注入 Codex',
+    'inject-opencode': '注入 OpenCode',
+    update: '更新 CodeGraph',
     build: '构建图谱',
     rebuild: '重构图谱',
     delete: '删除图谱',
@@ -736,6 +887,20 @@ function codexStatusLabel(status: CodexIntegrationStatus | null): string {
   if (status.configState === 'conflict') return '配置冲突';
   if (!status.codeGraphInstalled) return '未安装 CodeGraph';
   return status.injected ? '已注入' : '未注入';
+}
+
+function opencodeStatusLabel(status: OpencodeIntegrationStatus | null): string {
+  if (!status) return '检测中';
+  if (status.configState === 'unreadable') return '无法读取配置';
+  if (status.configState === 'conflict') return '配置冲突';
+  if (!status.codeGraphInstalled) return '未安装 CodeGraph';
+  return status.injected ? '已注入' : '未注入';
+}
+
+function updateStatusLabel(update: UpdateStatus | null, install: InstallStatus | null): string {
+  if (update?.updateAvailable) return '发现新版本';
+  if (!update || update.latestVersion === null) return install?.installed ? '检测中' : '未安装 CodeGraph';
+  return '已是最新';
 }
 
 function jobStateLabel(state: JobSnapshot['state']): string {

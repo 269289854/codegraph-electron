@@ -1,19 +1,24 @@
 import { dialog, ipcMain } from 'electron';
 import path from 'node:path';
 import {
-  detectCodexIntegration,
   detectCodeGraphInstall,
+  detectCodexIntegration,
+  detectOpencodeIntegration,
   readCodeGraphStatus,
   runCodeGraphCommand,
   startCodexInjection,
   startOfficialInstall,
+  startOpencodeInjection,
 } from './services/codegraph.js';
-import { readRecentProjects, upsertRecentProject } from './services/projects.js';
+import { readRecentProjects, removeRecentProject, upsertRecentProject } from './services/projects.js';
 import { jobRunner } from './services/jobs.js';
 import { readGraphSnapshot } from './services/graph-snapshot.js';
 import { getRuntimeLogPath, logError, logInfo } from './services/runtime-logger.js';
+import { checkForUpdates, runCodeGraphUpgrade } from './services/updates.js';
 
 let codexInjectionInFlight = false;
+let opencodeInjectionInFlight = false;
+let updateInFlight = false;
 
 ipcMain.handle('codegraph:detect-install', async () =>
   withIpcLogging('codegraph:detect-install', undefined, () => detectCodeGraphInstall()),
@@ -49,6 +54,51 @@ ipcMain.handle('codex:inject', async (event) => {
   }
 });
 
+ipcMain.handle('opencode:detect', async () =>
+  withIpcLogging('opencode:detect', undefined, () => detectOpencodeIntegration()),
+);
+
+ipcMain.handle('opencode:inject', async (event) => {
+  if (opencodeInjectionInFlight) {
+    throw new Error('OpenCode 注入任务正在运行。');
+  }
+  opencodeInjectionInFlight = true;
+  try {
+    return await withIpcLogging('opencode:inject', undefined, () =>
+      jobRunner.run({
+        kind: 'inject-opencode',
+        run: ({ job, appendLog }) => startOpencodeInjection(job.id, event.sender, appendLog),
+      }),
+    );
+  } finally {
+    opencodeInjectionInFlight = false;
+  }
+});
+
+ipcMain.handle('codegraph:check-update', async () =>
+  withIpcLogging('codegraph:check-update', undefined, async () => {
+    const install = await detectCodeGraphInstall();
+    return checkForUpdates(install.version);
+  }),
+);
+
+ipcMain.handle('codegraph:update', async (event) => {
+  if (updateInFlight) {
+    throw new Error('CodeGraph 更新任务正在运行。');
+  }
+  updateInFlight = true;
+  try {
+    return await withIpcLogging('codegraph:update', undefined, () =>
+      jobRunner.run({
+        kind: 'update',
+        run: ({ job, appendLog }) => runCodeGraphUpgrade(job.id, event.sender, appendLog),
+      }),
+    );
+  } finally {
+    updateInFlight = false;
+  }
+});
+
 ipcMain.handle('project:select', async () => {
   logInfo('IPC project:select');
   const result = await dialog.showOpenDialog({
@@ -72,6 +122,11 @@ ipcMain.handle('project:select', async () => {
 });
 
 ipcMain.handle('project:recent', async () => withIpcLogging('project:recent', undefined, () => readRecentProjects()));
+
+ipcMain.handle('project:remove', async (_event, projectPath: string) => {
+  logInfo('IPC project:remove', { projectPath });
+  return withIpcLogging('project:remove', { projectPath }, () => removeRecentProject(projectPath));
+});
 
 ipcMain.handle('project:status', async (_event, projectPath: string) => {
   logInfo('IPC project:status', { projectPath });

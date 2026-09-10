@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ProjectInfo } from '../../shared/types.js';
 
-const maxRecentProjects = 12;
+const maxRecentProjects = 100;
 
 function storePath(): string {
   return path.join(app.getPath('userData'), 'recent-projects.json');
@@ -23,4 +23,12 @@ export async function upsertRecentProject(project: ProjectInfo): Promise<void> {
   const next = [project, ...recent.filter((item) => item.path !== project.path)].slice(0, maxRecentProjects);
   await fs.mkdir(path.dirname(storePath()), { recursive: true });
   await fs.writeFile(storePath(), JSON.stringify(next, null, 2), 'utf-8');
+}
+
+export async function removeRecentProject(projectPath: string): Promise<ProjectInfo[]> {
+  const recent = await readRecentProjects();
+  const next = recent.filter((item) => item.path !== projectPath);
+  await fs.mkdir(path.dirname(storePath()), { recursive: true });
+  await fs.writeFile(storePath(), JSON.stringify(next, null, 2), 'utf-8');
+  return next;
 }

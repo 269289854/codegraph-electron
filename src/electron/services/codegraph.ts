@@ -10,6 +10,8 @@ import type {
   CodexValidationState,
   InstallStatus,
   JobLog,
+  OpencodeConfigState,
+  OpencodeIntegrationStatus,
   ProjectStatus,
 } from '../../shared/types.js';
 import { parseStatusJson } from './status-parser.js';
@@ -20,6 +22,8 @@ export type CommandRunner = (command: string, args: string[], cwd?: string) => P
 
 const codexMcpHeader = '[mcp_servers.codegraph]';
 const codexInjectionArgs = ['install', '--target=codex', '--location=global', '--yes'];
+const opencodeInjectionArgs = ['install', '--target=opencode', '--location=global', '--yes'];
+const opencodeEntryCommand = ['codegraph', 'serve', '--mcp'];
 
 export const officialInstallCommand = {
   command: 'powershell.exe',
@@ -238,6 +242,183 @@ export async function startCodexInjection(
     throw new Error(`注入命令已完成，但未检测到有效的 Codex MCP 配置：${after.message}`);
   }
   return after;
+}
+
+export function opencodeConfigDir(homeDirectory = os.homedir()): string {
+  const xdg = process.env.XDG_CONFIG_HOME?.trim();
+  return path.join(xdg && xdg.length > 0 ? xdg : path.join(homeDirectory, '.config'), 'opencode');
+}
+
+export function opencodeConfigPath(homeDirectory = os.homedir()): string {
+  const dir = opencodeConfigDir(homeDirectory);
+  const jsonc = path.join(dir, 'opencode.jsonc');
+  const json = path.join(dir, 'opencode.json');
+  if (fsSync.existsSync(jsonc)) return jsonc;
+  if (fsSync.existsSync(json)) return json;
+  return jsonc;
+}
+
+export function parseOpencodeConfigState(content: string): OpencodeConfigState {
+  let config: unknown;
+  try {
+    config = JSON.parse(stripJsonComments(content));
+  } catch {
+    return 'unreadable';
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return 'unreadable';
+
+  const root = config as Record<string, unknown>;
+  const mcp = isPlainObject(root.mcp) ? root.mcp : {};
+  const servers = isPlainObject(mcp.servers) ? mcp.servers : {};
+
+  if (servers.codegraph !== undefined) {
+    return isOpencodeEntryValid(servers.codegraph) ? 'valid' : 'conflict';
+  }
+  if (mcp.codegraph !== undefined) {
+    return isOpencodeEntryValid(mcp.codegraph) ? 'valid' : 'conflict';
+  }
+  return 'missing';
+}
+
+export async function detectOpencodeIntegration(
+  runner?: CommandRunner,
+  configPath = opencodeConfigPath(),
+): Promise<OpencodeIntegrationStatus> {
+  const run = runner ?? ((command, args, cwd) => spawnCommand(command, args, { cwd }));
+  const install = await detectCodeGraphInstall(run);
+  const configState = await readOpencodeConfigState(configPath);
+  const injected = configState === 'valid';
+  const canInject = install.installed && configState === 'missing';
+
+  return {
+    injected,
+    codeGraphInstalled: install.installed,
+    configPath,
+    configState,
+    canInject,
+    message: opencodeIntegrationMessage({
+      configState,
+      codeGraphInstalled: install.installed,
+      injected,
+    }),
+  };
+}
+
+export async function startOpencodeInjection(
+  jobId: string,
+  sender: WebContents,
+  appendLog: (stream: JobLog['stream'], text: string) => void,
+  runner?: CommandRunner,
+  configPath = opencodeConfigPath(),
+): Promise<OpencodeIntegrationStatus> {
+  const before = await detectOpencodeIntegration(runner, configPath);
+  if (!before.canInject) {
+    throw new Error(before.message);
+  }
+
+  appendLog('system', '正在调用 CodeGraph 官方安装器注入 OpenCode MCP。');
+  const result = await runCodeGraphCliCommand(opencodeInjectionArgs, {
+    cwd: process.env.USERPROFILE ?? process.cwd(),
+    sender,
+    jobId,
+    appendLog,
+  }, runner);
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || `OpenCode 注入失败，退出码：${result.exitCode ?? 'unknown'}。`);
+  }
+
+  const after = await detectOpencodeIntegration(runner, configPath);
+  if (!after.injected) {
+    throw new Error(`注入命令已完成，但未检测到有效的 OpenCode MCP 配置：${after.message}`);
+  }
+  return after;
+}
+
+async function readOpencodeConfigState(configPath: string): Promise<OpencodeConfigState> {
+  try {
+    return parseOpencodeConfigState(await fs.readFile(configPath, 'utf8'));
+  } catch (error) {
+    if (isFileMissingError(error)) return 'missing';
+    return 'unreadable';
+  }
+}
+
+function isOpencodeEntryValid(entry: unknown): boolean {
+  if (!isPlainObject(entry)) return false;
+  if (entry.type !== 'local') return false;
+  if (!Array.isArray(entry.command)) return false;
+  return entry.command.length === opencodeEntryCommand.length
+    && entry.command.every((part, index) => part === opencodeEntryCommand[index]);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stripJsonComments(content: string): string {
+  let output = '';
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index]!;
+    const next = content[index + 1];
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false;
+        output += char;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (char === '*' && next === '/') {
+        inBlockComment = false;
+        index += 1;
+      }
+      continue;
+    }
+    if (inString) {
+      output += char;
+      if (char === '\\') {
+        if (index + 1 < content.length) {
+          output += content[index + 1]!;
+          index += 1;
+        }
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      output += char;
+      continue;
+    }
+    if (char === '/' && next === '/') {
+      inLineComment = true;
+      index += 1;
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      inBlockComment = true;
+      index += 1;
+      continue;
+    }
+    output += char;
+  }
+  return output;
+}
+
+function opencodeIntegrationMessage({
+  configState,
+  codeGraphInstalled,
+  injected,
+}: Pick<OpencodeIntegrationStatus, 'configState' | 'codeGraphInstalled' | 'injected'>): string {
+  if (configState === 'unreadable') return '无法读取 OpenCode 配置文件。';
+  if (configState === 'conflict') return '检测到已有 CodeGraph 配置，但内容与官方配置不一致。';
+  if (!codeGraphInstalled) return '未安装 CodeGraph，暂时不能注入 OpenCode。';
+  if (injected) return 'CodeGraph 已注入 OpenCode。';
+  return 'CodeGraph 已安装，可以注入 OpenCode。';
 }
 
 export async function readCodeGraphStatus(projectPath: string): Promise<ProjectStatus> {

@@ -47,7 +47,7 @@ export type ProjectInfo = {
   status: ProjectStatus | null;
 };
 
-export type JobKind = 'install' | 'inject' | 'build' | 'rebuild' | 'delete';
+export type JobKind = 'install' | 'inject' | 'inject-opencode' | 'update' | 'build' | 'rebuild' | 'delete';
 
 export type JobState = 'queued' | 'running' | 'succeeded' | 'failed';
 
@@ -110,4 +110,25 @@ export type GraphSnapshot = {
   totalEdges: number;
   limited: boolean;
   generatedAt: number;
+};
+
+export type UpdateStatus = {
+  installedVersion: string | null;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  message: string;
+  checkedAt: number | null;
+  error?: string;
+};
+
+export type OpencodeConfigState = 'missing' | 'valid' | 'conflict' | 'unreadable';
+
+export type OpencodeIntegrationStatus = {
+  injected: boolean;
+  codeGraphInstalled: boolean;
+  configPath: string;
+  configState: OpencodeConfigState;
+  canInject: boolean;
+  message: string;
 };

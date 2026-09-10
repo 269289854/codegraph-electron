@@ -151,6 +151,21 @@ button:disabled {
   white-space: nowrap;
 }
 
+.update-panel.update-available {
+  border-color: #2d6cdf;
+  background: #16203a;
+}
+
+.update-panel.update-available .codex-panel-heading span {
+  color: #7fb0ff;
+}
+
+.release-link {
+  text-decoration: none;
+  font-size: 13px;
+  height: 36px;
+}
+
 .project-list {
   display: flex;
   flex-direction: column;
@@ -166,11 +181,70 @@ button:disabled {
   padding: 10px;
   text-align: left;
   flex-direction: column;
+  cursor: pointer;
+  border: 1px solid #2d3542;
+  border-radius: 6px;
+  background: #181c23;
+}
+
+.project:hover {
+  border-color: #4c96ff;
+  background: #1e2631;
 }
 
 .project.active {
   border-color: #4c96ff;
   background: #1d2837;
+}
+
+.project-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.project-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.project-remove {
+  flex-shrink: 0;
+  height: 26px;
+  width: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #8d98a8;
+}
+
+.project-remove:hover:not(:disabled) {
+  color: #eb6f92;
+  border-color: #3a2d33;
+  background: #241a1f;
+}
+
+.project-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.project-pagination span {
+  color: #8d98a8;
+  font-size: 12px;
+}
+
+.page-button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .workspace {

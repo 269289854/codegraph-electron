@@ -5,10 +5,13 @@ import path from 'node:path';
 import {
   detectCodexIntegration,
   detectCodeGraphInstall,
+  detectOpencodeIntegration,
   normalizeSpawnCommand,
   officialInstallCommand,
   parseCodexConfigState,
+  parseOpencodeConfigState,
   startCodexInjection,
+  startOpencodeInjection,
   type CommandRunner,
 } from '../src/electron/services/codegraph.js';
 
@@ -205,6 +208,69 @@ describe('CodeGraph install detection', () => {
     const injectionCall = calls.find((call) => call.command === codeGraphCommandPath && call.args[0] === 'install');
 
     expect(injectionCall?.args).toEqual(['install', '--target=codex', '--location=global', '--yes']);
+    expect(status.injected).toBe(true);
+    expect(status.configState).toBe('valid');
+  });
+
+  it('classifies OpenCode MCP configuration states', () => {
+    expect(parseOpencodeConfigState('{ "model": "deepseek" }')).toBe('missing');
+    expect(parseOpencodeConfigState(JSON.stringify({
+      $schema: 'https://opencode.ai/config.json',
+      mcp: { servers: { codegraph: { type: 'local', command: ['codegraph', 'serve', '--mcp'], disabled: false, codemode: false } } },
+    }))).toBe('valid');
+    expect(parseOpencodeConfigState(JSON.stringify({
+      mcp: { codegraph: { type: 'local', command: ['codegraph', 'serve', '--mcp'], enabled: true } },
+    }))).toBe('valid');
+    expect(parseOpencodeConfigState(JSON.stringify({
+      mcp: { servers: { codegraph: { type: 'local', command: ['other', 'serve', '--mcp'], disabled: false } } },
+    }))).toBe('conflict');
+    expect(parseOpencodeConfigState('{ not json')).toBe('unreadable');
+  });
+
+  it('tolerates jsonc comments when reading OpenCode configuration', () => {
+    const content = [
+      '// opencode config',
+      '{',
+      '  "$schema": "https://opencode.ai/config.json", // schema',
+      '  "mcp": { "servers": { "codegraph": { "type": "local", "command": ["codegraph", "serve", "--mcp"], "disabled": false } } }',
+      '}',
+    ].join('\n');
+
+    expect(parseOpencodeConfigState(content)).toBe('valid');
+  });
+
+  it('enables OpenCode injection only when CodeGraph is installed and config is missing', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-opencode-')), 'opencode.jsonc');
+    const { runner } = createRunner();
+
+    const status = await withMissingBundledInstall(() => detectOpencodeIntegration(runner, configPath));
+
+    expect(status.configState).toBe('missing');
+    expect(status.injected).toBe(false);
+    expect(status.canInject).toBe(true);
+  });
+
+  it('rejects OpenCode injection when CodeGraph is not installed', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-opencode-no-cli-')), 'opencode.jsonc');
+    const { runner } = createRunner({ codeGraphInstalled: false });
+
+    await expect(withMissingBundledInstall(() => startOpencodeInjection('inject-opencode', undefined as never, () => undefined, runner, configPath)))
+      .rejects.toThrow('未安装 CodeGraph');
+  });
+
+  it('injects OpenCode through the official CLI arguments and verifies the result', async () => {
+    const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'codegraph-opencode-inject-')), 'opencode.jsonc');
+    const { calls, runner } = createRunner({
+      onInject: () => fs.writeFileSync(configPath, JSON.stringify({
+        $schema: 'https://opencode.ai/config.json',
+        mcp: { servers: { codegraph: { type: 'local', command: ['codegraph', 'serve', '--mcp'], disabled: false, codemode: false } } },
+      })),
+    });
+
+    const status = await withMissingBundledInstall(() => startOpencodeInjection('inject-opencode', undefined as never, () => undefined, runner, configPath));
+    const injectionCall = calls.find((call) => call.command === codeGraphCommandPath && call.args[0] === 'install');
+
+    expect(injectionCall?.args).toEqual(['install', '--target=opencode', '--location=global', '--yes']);
     expect(status.injected).toBe(true);
     expect(status.configState).toBe('valid');
   });
